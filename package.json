@@ -1,0 +1,42 @@
+{
+  "name": "@proctorlink/sdk",
+  "version": "0.1.0",
+  "description": "Platform-agnostic browser SDK for ProctorLink. Mounts a cross-origin enclave iframe that captures camera keyframes and proctoring events, and streams them to the host application (e.g. an Angular quiz portal).",
+  "type": "module",
+  "main": "./dist/proctorlink.cjs",
+  "module": "./dist/proctorlink.esm.js",
+  "browser": "./dist/proctorlink.js",
+  "types": "./dist/types/loader/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/loader/index.d.ts",
+      "import": "./dist/proctorlink.esm.js",
+      "require": "./dist/proctorlink.cjs",
+      "default": "./dist/proctorlink.js"
+    },
+    "./enclave/": "./dist/enclave/",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node build.mjs && npm run types",
+    "types": "tsc -p tsconfig.json --emitDeclarationOnly --outDir dist/types",
+    "demo": "npm run build && node examples/demo/mock-ingest.mjs",
+    "clean": "rm -rf dist",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run clean && npm run build && npm run types"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.0"
+  },
+  "license": "UNLICENSED"
+}

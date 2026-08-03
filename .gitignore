@@ -1,0 +1,5 @@
+node_modules
+dist
+examples/demo/.captures
+*.log
+.DS_Store

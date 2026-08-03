@@ -1,0 +1,107 @@
+/**
+ * Ingest client — the enclave's only outbound channel to the backend.
+ *
+ * Holds the session JWT. Events are batched and flushed on an interval. Frames
+ * are uploaded straight to object storage (S3) via a presigned PUT, so the large
+ * image bytes never transit our own API:
+ *
+ *   1. POST /v1/ingest/frames/presign  -> { uploadUrl, key }   (auth: session JWT)
+ *   2. PUT  <uploadUrl>  (the raw JPEG) -> S3                    (auth: presigned)
+ *   3. POST /v1/ingest/frames/commit    -> record evidence row   (auth: session JWT)
+ *
+ * This keeps per-session cost near zero (uploads to S3 are free; we pay only a
+ * tiny PUT + storage) and keeps our backend off the image hot path.
+ *
+ * MVP note: retries are in-memory only. Phase 1 replaces this with the
+ * IndexedDB-backed offline queue described in CLAUDE.md §2 so a mid-exam network
+ * drop cannot silently lose evidence.
+ */
+
+import type { ProctorEvent } from '../shared/protocol';
+
+interface PresignResponse {
+  uploadUrl: string;
+  key: string;
+}
+
+export class IngestClient {
+  private queue: ProctorEvent[] = [];
+  private flushing = false;
+
+  constructor(
+    private readonly baseUrl: string,
+    private readonly jwt: string,
+    private readonly sessionId: string,
+  ) {}
+
+  queueEvent(event: ProctorEvent) {
+    this.queue.push(event);
+  }
+
+  async flushEvents(): Promise<void> {
+    if (this.flushing || this.queue.length === 0) return;
+    this.flushing = true;
+    const batch = this.queue.splice(0, this.queue.length);
+    try {
+      await this.postJson('/v1/ingest/events', { sessionId: this.sessionId, events: batch });
+    } catch (err) {
+      this.queue.unshift(...batch); // nothing dropped while we retry
+      console.warn('[ProctorLink][enclave] event flush failed, will retry', err);
+    } finally {
+      this.flushing = false;
+    }
+  }
+
+  /** Upload one keyframe to S3 via a presigned PUT. Returns the stored object key. */
+  async uploadFrame(seq: number, ts: number, blob: Blob): Promise<string | null> {
+    const contentType = blob.type || 'image/jpeg';
+    try {
+      const { uploadUrl, key } = await this.postJson<PresignResponse>('/v1/ingest/frames/presign', {
+        sessionId: this.sessionId,
+        seq,
+        ts,
+        contentType,
+      });
+
+      const put = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'content-type': contentType },
+        body: blob,
+      });
+      if (!put.ok) throw new Error(`s3 put -> ${put.status}`);
+
+      // Best-effort: tell the backend the object is in place so it can flip the
+      // evidence row to "stored". Safe to lose — a sweeper can reconcile from S3.
+      await this.postJson('/v1/ingest/frames/commit', {
+        sessionId: this.sessionId,
+        seq,
+        key,
+        ts,
+      }).catch(() => undefined);
+
+      return key;
+    } catch (err) {
+      console.warn('[ProctorLink][enclave] frame upload failed', err);
+      return null;
+    }
+  }
+
+  /** Marks the session finished so the backend can finalise counts / usage. */
+  async endSession(): Promise<void> {
+    await this.postJson(`/v1/sessions/${this.sessionId}/end`, {}).catch(() => undefined);
+  }
+
+  private async postJson<T = unknown>(path: string, body: unknown): Promise<T> {
+    const res = await fetch(this.baseUrl.replace(/\/$/, '') + path, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${this.jwt}`,
+      },
+      body: JSON.stringify(body),
+      keepalive: true,
+    });
+    if (!res.ok) throw new Error(`ingest ${path} -> ${res.status}`);
+    return (await res.json().catch(() => ({}))) as T;
+  }
+}

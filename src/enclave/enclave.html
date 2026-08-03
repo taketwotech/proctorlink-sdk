@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ProctorLink</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font-family: system-ui, sans-serif; }
+      #pl-video { width: 100%; height: 100%; object-fit: cover; display: block; }
+      #pl-canvas { display: none; }
+      #pl-status {
+        position: absolute; left: 6px; bottom: 6px; color: #fff; font-size: 11px;
+        background: rgba(0,0,0,.55); padding: 2px 6px; border-radius: 4px; letter-spacing: .02em;
+      }
+      #pl-dot {
+        position: absolute; right: 8px; top: 8px; width: 8px; height: 8px; border-radius: 50%;
+        background: #e11; box-shadow: 0 0 0 rgba(238,17,17,.6); animation: pulse 1.6s infinite;
+      }
+      @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(238,17,17,.6);} 100% { box-shadow: 0 0 0 8px rgba(238,17,17,0);} }
+    </style>
+  </head>
+  <body>
+    <video id="pl-video" autoplay playsinline muted></video>
+    <canvas id="pl-canvas"></canvas>
+    <span id="pl-dot"></span>
+    <span id="pl-status">loading…</span>
+    <script src="./enclave.js"></script>
+  </body>
+</html>
