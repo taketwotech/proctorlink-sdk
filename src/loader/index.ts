@@ -24,9 +24,15 @@ import {
   type ProctorEvent,
 } from '../shared/protocol';
 
+/**
+ * Where ProctorLink hosts the enclave. Customers can omit `enclaveUrl` and get
+ * this automatically; override it only for self-hosting or a different region.
+ */
+export const DEFAULT_ENCLAVE_URL = 'https://app-dev.proctorlink.com/enclave/enclave.html';
+
 export interface CreateSessionOptions {
-  /** Full URL to the hosted enclave document, e.g. https://enclave.proctorlink.com/enclave.html */
-  enclaveUrl: string;
+  /** Full URL to the hosted enclave document. Defaults to ProctorLink's hosted enclave. */
+  enclaveUrl?: string;
   /** Short-lived session JWT minted by the dashboard's POST /v1/sessions. */
   jwt: string;
   /** Session id. If omitted, it is decoded from the JWT payload (sid/sub). */
@@ -89,7 +95,8 @@ export class ProctorSession {
   private readonly hostHandlers: Array<[EventTarget, string, EventListener]> = [];
 
   constructor(options: CreateSessionOptions) {
-    const enclaveOrigin = new URL(options.enclaveUrl).origin;
+    const enclaveUrl = options.enclaveUrl || DEFAULT_ENCLAVE_URL;
+    const enclaveOrigin = new URL(enclaveUrl).origin;
     const sessionId = options.sessionId || decodeSessionIdFromJwt(options.jwt);
     if (!sessionId) {
       throw new Error('[ProctorLink] sessionId is required (pass it explicitly or use a JWT that carries sid/session_id/sub).');
@@ -97,7 +104,7 @@ export class ProctorSession {
     this.enclaveOrigin = enclaveOrigin;
     this.sessionId = sessionId;
     this.opts = {
-      enclaveUrl: options.enclaveUrl,
+      enclaveUrl,
       jwt: options.jwt,
       sessionId,
       ingestBaseUrl: options.ingestBaseUrl || enclaveOrigin,

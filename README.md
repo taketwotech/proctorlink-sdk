@@ -79,7 +79,7 @@ The session API key is server-side only. The customer's backend calls the
 dashboard:
 
 ```
-POST https://dashboard.proctorlink.com/v1/sessions
+POST https://app-dev.proctorlink.com/v1/sessions
 Authorization: Bearer <TENANT_API_KEY>
 { "external_user_id": "candidate-123", "exam_id": "math-final",
   "allowed_origins": ["https://exams.customer.com"], "ttl": 7200 }
@@ -95,10 +95,9 @@ They hand `{ session_id, session_jwt }` to their frontend.
 import { ProctorLink } from '@proctorlink/sdk';
 
 const session = ProctorLink.createSession({
-  enclaveUrl: 'https://enclave.proctorlink.com/enclave.html',
   jwt: sessionJwt,
   sessionId,
-  frameIntervalMs: 5000,
+  // enclaveUrl defaults to ProctorLink's hosted enclave — override only to self-host.
 });
 
 session.on('permission', (p) => { /* p.camera === 'granted' | 'denied' */ });
@@ -118,7 +117,7 @@ An Angular service + component example is in
 ### 3. Their CSP + iframe requirements (document this to the customer)
 
 - Allow our enclave in their `Content-Security-Policy`: `frame-src
-  https://enclave.proctorlink.com`.
+  https://app-dev.proctorlink.com`.
 - The SDK sets `allow="camera; microphone"` on the iframe automatically; the
   host page must not strip it.
 
@@ -130,7 +129,7 @@ An Angular service + component example is in
 
 | option                | default              | notes |
 |-----------------------|----------------------|-------|
-| `enclaveUrl`          | —                    | Hosted enclave document URL. |
+| `enclaveUrl`          | ProctorLink hosted   | Hosted enclave document URL. Override only to self-host. |
 | `jwt`                 | —                    | Short-lived session JWT from the dashboard. |
 | `sessionId`           | decoded from JWT     | `sid` / `session_id` / `sub` claim. |
 | `ingestBaseUrl`       | enclave origin       | Where the enclave uploads events + frames. |

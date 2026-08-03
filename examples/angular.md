@@ -28,10 +28,9 @@ export class ProctoringService {
 
   async start(sessionId: string, jwt: string) {
     this.session = ProctorLink.createSession({
-      enclaveUrl: 'https://enclave.proctorlink.com/enclave.html',
       jwt,
       sessionId,
-      frameIntervalMs: 5000,
+      // enclaveUrl defaults to ProctorLink's hosted enclave.
     });
 
     // SDK callbacks fire outside Angular's zone — re-enter so bindings update.
@@ -103,7 +102,7 @@ Keep the tenant API key server-side. This proxies to the ProctorLink dashboard:
 ```ts
 // POST /api/proctoring/session  (Node/Express sketch)
 app.post('/api/proctoring/session', async (req, res) => {
-  const r = await fetch('https://dashboard.proctorlink.com/v1/sessions', {
+  const r = await fetch('https://app-dev.proctorlink.com/v1/sessions', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -122,7 +121,7 @@ app.post('/api/proctoring/session', async (req, res) => {
 
 ## Notes
 
-- Add our enclave origin to the app's CSP: `frame-src https://enclave.proctorlink.com`.
+- Add our enclave origin to the app's CSP: `frame-src https://app-dev.proctorlink.com`.
 - SDK callbacks run outside Angular's zone; wrap state updates in `NgZone.run`
   (done in the service above) or use `ChangeDetectorRef`.
 - The camera preview mounts as a floating pip by default. Pass `mount:
