@@ -1,6 +1,6 @@
 {
   "name": "@proctorlink/sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Platform-agnostic browser SDK for ProctorLink. Mounts a cross-origin enclave iframe that captures camera keyframes and proctoring events, and streams them to the host application (e.g. an Angular quiz portal).",
   "type": "module",
   "main": "./dist/proctorlink.cjs",
