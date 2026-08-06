@@ -1,6 +1,6 @@
 # @proctorlink/sdk
 
-Browser SDK for [ProctorLink](https://app-dev.proctorlink.com) — add camera-based
+Browser SDK for [ProctorLink](https://proctorlink.com/?utm_source=npmjs_portal&utm_medium=web&utm_campaign=npmjs_traffic) — add camera-based
 proctoring to any web-based assessment. Framework-agnostic (Angular, React, Vue,
 or plain HTML), with a tiny (~4 KB) footprint and no secrets in the browser.
 
@@ -14,11 +14,6 @@ also receives the live event stream, so you can react or keep your own copy.
 npm install @proctorlink/sdk
 ```
 
-Or load it directly from a `<script>` tag (exposes a global `ProctorLink`):
-
-```html
-<script src="https://app-dev.proctorlink.com/sdk/proctorlink.js"></script>
-```
 
 ## Quick start
 
@@ -38,7 +33,7 @@ content-type: application/json
 
 {
   "external_user_id": "candidate-123",
-  "exam_id": "math-final",
+  "exam_id": "math-11",
   "attempt_id": "attempt-789",
   "allowed_origins": ["https://exams.yourcompany.com"]
 }
@@ -83,19 +78,16 @@ handled by ProctorLink.
 
 ## Configuration
 
-`ProctorLink.createSession(options)` returns a `ProctorSession`.
+`ProctorLink.createSession(options)` takes the two values from your mint response:
 
-| Option                | Default            | Description |
-|-----------------------|--------------------|-------------|
-| `jwt`                 | **required**       | Short-lived session JWT from `POST /v1/sessions`. |
-| `sessionId`           | decoded from `jwt` | Session id. Provide it, or it is read from the JWT. |
-| `enclaveUrl`          | ProctorLink hosted | The hosted camera enclave. Override only to self-host. |
-| `ingestBaseUrl`       | enclave origin     | Where the enclave uploads events and frames. |
-| `frameIntervalMs`     | `60000`            | Keyframe capture cadence (one per minute). |
-| `heartbeatIntervalMs` | `5000`             | Liveness heartbeat cadence. |
-| `mount`               | floating preview   | Element to mount the camera preview into. |
-| `showPreview`         | `true`             | Show the camera preview. `false` hides it (1×1 iframe). |
-| `captureAudio`        | `false`            | Also request the microphone. |
+| Option      | Default            | Description |
+|-------------|--------------------|-------------|
+| `jwt`       | **required**       | The `session_jwt` returned by `POST /v1/sessions`. |
+| `sessionId` | decoded from `jwt` | The `session_id` from the same response. Optional — read from the JWT if omitted. |
+
+Optional display overrides are available if you need them — `mount` (the element to
+place the camera preview in) and `showPreview` (`false` hides it). The defaults suit
+most integrations.
 
 ## API
 
