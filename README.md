@@ -81,8 +81,6 @@ That's the entire browser integration. Everything else — hosting the camera
 enclave, storing frames, running face analysis, generating the report — is
 handled by ProctorLink.
 
-A complete Angular example is in [`examples/angular.md`](examples/angular.md).
-
 ## Configuration
 
 `ProctorLink.createSession(options)` returns a `ProctorSession`.
