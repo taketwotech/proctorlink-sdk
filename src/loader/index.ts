@@ -49,6 +49,17 @@ export interface CreateSessionOptions {
   captureAudio?: boolean;
   /** Show the camera preview pip. Default true. When false the iframe is 1×1 and hidden. */
   showPreview?: boolean;
+  /**
+   * Begin recording keyframes as soon as the camera is granted. Default true.
+   *
+   * Leave it alone for the usual flow: `start()` and the exam is being recorded,
+   * with the first captured frame acting as the identity reference.
+   *
+   * Set false when you want a pre-exam photo step. `start()` then brings the
+   * camera up without recording, so you can call `captureIdentity()` and begin
+   * the exam with `beginCapture()` when the candidate is ready.
+   */
+  autoStartCapture?: boolean;
 }
 
 export type SessionEventMap = {
@@ -82,6 +93,12 @@ export class ProctorSession {
   private ready = false;
   private stopped = false;
   private destroyRequested = false;
+  /** In-flight captureIdentity() calls, keyed by the id sent to the enclave. */
+  private readonly pendingCaptures = new Map<
+    string,
+    { resolve: () => void; reject: (err: Error) => void; timer: number }
+  >();
+  private captureSeq = 0;
   private destroyTimer = 0;
 
   private readonly listeners: { [K in keyof SessionEventMap]: Set<Listener<SessionEventMap[K]>> } = {
@@ -112,11 +129,17 @@ export class ProctorSession {
       heartbeatIntervalMs: options.heartbeatIntervalMs ?? 5000,
       captureAudio: options.captureAudio ?? false,
       showPreview: options.showPreview ?? true,
+      // Default true keeps the existing one-call flow working unchanged.
+      autoStartCapture: options.autoStartCapture ?? true,
       mount: options.mount,
     };
   }
 
-  /** Mounts the enclave, requests the camera and begins capture. Resolves when the enclave is ready. */
+  /**
+   * Mounts the enclave and requests the camera. Resolves when the enclave is
+   * ready. Recording starts here too, unless the session was created with
+   * `autoStartCapture: false` — then call `beginCapture()` when the exam begins.
+   */
   start(): Promise<void> {
     if (this.iframe) {
       return Promise.reject(new Error('[ProctorLink] session already started'));
@@ -150,10 +173,60 @@ export class ProctorSession {
     return this.on('event', cb);
   }
 
+  /**
+   * Capture the candidate's identity photo — the baseline every exam frame is
+   * matched against. Call it from your pre-exam "take your photo" step, after
+   * `start()` has resolved so the camera is live.
+   *
+   * Without this (and without a `reference_image_url` at mint) the first frame
+   * captured during the exam becomes the baseline, which only detects someone
+   * swapping in mid-exam — not an impostor who sat the whole thing.
+   *
+   * Safe to call again for a retake: the previous photo is replaced. The image
+   * goes straight from the browser to ProctorLink storage; it never passes
+   * through your page.
+   *
+   * @returns resolves when the photo is stored, rejects with the reason if not.
+   */
+  captureIdentity(): Promise<void> {
+    if (this.stopped) return Promise.reject(new Error('session already stopped'));
+    if (!this.iframe) return Promise.reject(new Error('session not started'));
+
+    const id = `cap-${++this.captureSeq}`;
+    return new Promise<void>((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        this.pendingCaptures.delete(id);
+        reject(new Error('identity capture timed out'));
+      }, 20000);
+      this.pendingCaptures.set(id, { resolve, reject, timer });
+      this.postToEnclave({ kind: 'pl:capture-identity', id });
+    });
+  }
+
+  /**
+   * Start recording exam keyframes. Only needed when the session was created
+   * with `autoStartCapture: false` — otherwise recording is already running and
+   * this is a no-op.
+   *
+   * Call it when the exam actually begins, typically right after the candidate's
+   * identity photo has been accepted.
+   */
+  beginCapture(): void {
+    if (this.stopped || !this.iframe) return;
+    this.postToEnclave({ kind: 'pl:begin-capture' });
+  }
+
   /** Signals the enclave to end capture and flush its queue. Keeps the iframe for a graceful stop. */
   stop(): void {
     if (this.stopped) return;
     this.stopped = true;
+    // Settle any in-flight captureIdentity() now rather than leaving the caller
+    // waiting on its 20s timeout for a session that is already shutting down.
+    for (const [, pending] of this.pendingCaptures) {
+      window.clearTimeout(pending.timer);
+      pending.reject(new Error('session stopped before the photo was stored'));
+    }
+    this.pendingCaptures.clear();
     this.postToEnclave({ kind: 'pl:stop' });
     this.detachHostHandlers();
   }
@@ -238,6 +311,16 @@ export class ProctorSession {
       case MSG.EVENT:
         this.emit('event', msg.event);
         break;
+      case MSG.IDENTITY_CAPTURED: {
+        const pending = this.pendingCaptures.get(msg.id);
+        if (pending) {
+          window.clearTimeout(pending.timer);
+          this.pendingCaptures.delete(msg.id);
+          if (msg.ok) pending.resolve();
+          else pending.reject(new Error(msg.error || 'identity capture failed'));
+        }
+        break;
+      }
       case MSG.STOPPED:
         // Enclave finished flushing + ending — safe to remove the iframe now.
         if (this.destroyRequested) this.finalizeDestroy();
@@ -256,6 +339,7 @@ export class ProctorSession {
       frameIntervalMs: this.opts.frameIntervalMs,
       heartbeatIntervalMs: this.opts.heartbeatIntervalMs,
       captureAudio: this.opts.captureAudio,
+      autoStartCapture: this.opts.autoStartCapture,
     };
   }
 

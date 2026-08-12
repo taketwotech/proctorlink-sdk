@@ -101,9 +101,73 @@ class Enclave {
     if (msg.kind === MSG.HOST_EVENT) {
       const evt = msg.event;
       this.emit(evt.type, 'host', evt.data, evt.ts);
+    } else if (msg.kind === MSG.CAPTURE_IDENTITY) {
+      void this.captureIdentity(msg.id);
+    } else if (msg.kind === MSG.BEGIN_CAPTURE) {
+      this.beginCapture();
     } else if (msg.kind === MSG.STOP) {
       void this.stop();
     }
+  }
+
+  /**
+   * Take the pre-exam identity photo — the baseline every exam frame is matched
+   * against. Uploaded through the same presigned path as keyframes, so the bytes
+   * go straight from the browser to storage and never touch the host page.
+   *
+   * Callable more than once: a retake replaces the previous photo, which is what
+   * a "the picture is blurry, try again" step needs.
+   */
+  private async captureIdentity(id: string): Promise<void> {
+    const fail = (error: string) =>
+      this.postUp({ kind: MSG.IDENTITY_CAPTURED, id, ok: false, error });
+
+    if (!this.config || !this.ingest) return fail('session not initialised');
+    if (!this.stream) return fail('camera not available');
+    if (this.video.videoWidth === 0) return fail('camera not ready');
+
+    const blob = await this.snapshot();
+    if (!blob) return fail('could not capture an image');
+
+    const key = await this.ingest.uploadFrame(0, Date.now(), blob, 'identity');
+    if (!key) return fail('upload failed');
+
+    this.postUp({ kind: MSG.IDENTITY_CAPTURED, id, ok: true });
+  }
+
+  /**
+   * Start periodic keyframe capture. Idempotent — calling it twice will not
+   * stack two timers, which matters because the host may call beginCapture()
+   * without knowing whether autoStartCapture already did.
+   */
+  private beginCapture(): void {
+    // frameTimer is 0 when unset (window.setInterval never returns 0), so a
+    // truthiness check is the correct "already running" test — `!= null` would
+    // be true for 0 and capture would never start.
+    if (this.frameTimer || !this.stream) return;
+    this.setStatus('recording');
+    this.frameTimer = window.setInterval(
+      () => this.captureFrame(),
+      this.config!.frameIntervalMs,
+    );
+    // Capture the first frame only once the camera is actually producing
+    // pixels — otherwise it's a black warm-up frame.
+    this.captureFirstFrameWhenReady();
+  }
+
+  /** Draw the current video frame to the canvas and return it as a JPEG blob. */
+  private snapshot(): Promise<Blob | null> {
+    const scale = Math.min(1, FRAME_MAX_WIDTH / this.video.videoWidth);
+    const w = Math.round(this.video.videoWidth * scale);
+    const h = Math.round(this.video.videoHeight * scale);
+    this.canvas.width = w;
+    this.canvas.height = h;
+    const ctx = this.canvas.getContext('2d');
+    if (!ctx) return Promise.resolve(null);
+    ctx.drawImage(this.video, 0, 0, w, h);
+    return new Promise((resolve) =>
+      this.canvas.toBlob((blob) => resolve(blob), 'image/jpeg', JPEG_QUALITY),
+    );
   }
 
   private async init(config: EnclaveInitConfig) {
@@ -138,10 +202,14 @@ class Enclave {
       this.emit('camera.granted', 'enclave');
       this.setStatus('recording');
 
-      this.frameTimer = window.setInterval(() => this.captureFrame(), this.config!.frameIntervalMs);
-      // Capture the first (reference) frame only once the camera is actually
-      // producing pixels — otherwise it's a black warm-up frame.
-      this.captureFirstFrameWhenReady();
+      // With autoStartCapture false the camera comes up but nothing is recorded
+      // yet — the host is running a pre-exam identity step and will call
+      // beginCapture() when the exam actually starts.
+      if (this.config!.autoStartCapture !== false) {
+        this.beginCapture();
+      } else {
+        this.setStatus('ready — waiting to start');
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.postUp({ kind: 'pl:permission', camera: 'denied', error: message });

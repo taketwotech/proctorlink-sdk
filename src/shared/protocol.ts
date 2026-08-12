@@ -68,6 +68,12 @@ export interface EnclaveInitConfig {
   heartbeatIntervalMs: number;
   /** Capture the mic as well as the camera. */
   captureAudio: boolean;
+  /**
+   * Start periodic keyframe capture as soon as the camera is granted (default).
+   * Set false to bring the camera up without recording, so an identity photo can
+   * be taken first; call `beginCapture()` to start the exam.
+   */
+  autoStartCapture: boolean;
 }
 
 /** A raw, unsequenced signal detected in the host page and forwarded down for uploading. */
@@ -81,6 +87,10 @@ export interface HostRawEvent {
 export type HostToEnclave =
   | { kind: 'pl:init'; version: number; config: EnclaveInitConfig }
   | { kind: 'pl:host-event'; event: HostRawEvent }
+  /** Capture the pre-exam identity photo. `id` correlates the reply. */
+  | { kind: 'pl:capture-identity'; id: string }
+  /** Begin periodic keyframe capture (only needed when autoStartCapture is false). */
+  | { kind: 'pl:begin-capture' }
   | { kind: 'pl:stop' };
 
 /** enclave -> loader */
@@ -89,12 +99,17 @@ export type EnclaveToHost =
   | { kind: 'pl:permission'; camera: 'granted' | 'denied'; error?: string }
   | { kind: 'pl:event'; event: ProctorEvent }
   | { kind: 'pl:stopped' }
+  /** Result of a pl:capture-identity request, matched by `id`. */
+  | { kind: 'pl:identity-captured'; id: string; ok: boolean; error?: string }
   | { kind: 'pl:error'; message: string };
 
 export const MSG = {
   INIT: 'pl:init',
   HOST_EVENT: 'pl:host-event',
   STOP: 'pl:stop',
+  CAPTURE_IDENTITY: 'pl:capture-identity',
+  BEGIN_CAPTURE: 'pl:begin-capture',
+  IDENTITY_CAPTURED: 'pl:identity-captured',
   READY: 'pl:ready',
   PERMISSION: 'pl:permission',
   EVENT: 'pl:event',

@@ -53,7 +53,17 @@ export class IngestClient {
   }
 
   /** Upload one keyframe to S3 via a presigned PUT. Returns the stored object key. */
-  async uploadFrame(seq: number, ts: number, blob: Blob): Promise<string | null> {
+  /**
+   * @param kind 'identity' is the pre-exam reference photo every later frame is
+   * matched against; the server stores it separately and never analyses it as a
+   * target. Anything else is a normal exam keyframe.
+   */
+  async uploadFrame(
+    seq: number,
+    ts: number,
+    blob: Blob,
+    kind: 'frame' | 'identity' = 'frame'
+  ): Promise<string | null> {
     const contentType = blob.type || 'image/jpeg';
     try {
       const { uploadUrl, key } = await this.postJson<PresignResponse>('/v1/ingest/frames/presign', {
@@ -61,6 +71,7 @@ export class IngestClient {
         seq,
         ts,
         contentType,
+        kind,
       });
 
       const put = await fetch(uploadUrl, {
@@ -77,6 +88,7 @@ export class IngestClient {
         seq,
         key,
         ts,
+        kind,
       }).catch(() => undefined);
 
       return key;
