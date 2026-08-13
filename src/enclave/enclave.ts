@@ -32,6 +32,8 @@ const EVENT_FLUSH_INTERVAL_MS = 3000;
 
 class Enclave {
   private config: EnclaveInitConfig | null = null;
+  /** Guards against emitting one auth-expiry notice per failed request. */
+  private authFailureNotified = false;
   private parentOrigin: string | null = null;
   private ingest: IngestClient | null = null;
 
@@ -105,6 +107,12 @@ class Enclave {
       void this.captureIdentity(msg.id);
     } else if (msg.kind === MSG.BEGIN_CAPTURE) {
       this.beginCapture();
+    } else if (msg.kind === MSG.UPDATE_TOKEN) {
+      this.ingest?.setToken(msg.jwt);
+      // Re-arm so a later expiry is reported again, and flush straight away:
+      // the queue holds everything that failed while the old token was dead.
+      this.authFailureNotified = false;
+      void this.ingest?.flushEvents();
     } else if (msg.kind === MSG.STOP) {
       void this.stop();
     }
@@ -133,6 +141,24 @@ class Enclave {
     if (!key) return fail('upload failed');
 
     this.postUp({ kind: MSG.IDENTITY_CAPTURED, id, ok: true });
+  }
+
+  /**
+   * Tell the host its token is no longer accepted, once per failure streak.
+   *
+   * Events fire every few seconds and frames every minute, so notifying per
+   * request would flood the host with duplicates for a single expiry. The flag
+   * clears when a new token arrives, so a second expiry is reported again.
+   */
+  private onAuthFailure(status: number): void {
+    if (this.authFailureNotified) return;
+    this.authFailureNotified = true;
+    const message =
+      status === 401
+        ? 'Session token expired or invalid — proctoring data is no longer being accepted.'
+        : `Ingest rejected with ${status} — proctoring data is no longer being accepted.`;
+    this.postUp({ kind: MSG.AUTH_EXPIRED, message });
+    this.emit('error', 'enclave', { code: 'auth_expired', status });
   }
 
   /**
@@ -172,7 +198,12 @@ class Enclave {
 
   private async init(config: EnclaveInitConfig) {
     this.config = config;
-    this.ingest = new IngestClient(config.ingestBaseUrl, config.jwt, config.sessionId);
+    this.ingest = new IngestClient(
+      config.ingestBaseUrl,
+      config.jwt,
+      config.sessionId,
+      (status) => this.onAuthFailure(status),
+    );
 
     this.emit('session.started', 'enclave', { sdkProtocol: PROTOCOL_VERSION });
 

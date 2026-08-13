@@ -91,6 +91,8 @@ export type HostToEnclave =
   | { kind: 'pl:capture-identity'; id: string }
   /** Begin periodic keyframe capture (only needed when autoStartCapture is false). */
   | { kind: 'pl:begin-capture' }
+  /** Replace the session token the enclave authenticates ingest with. */
+  | { kind: 'pl:update-token'; jwt: string }
   | { kind: 'pl:stop' };
 
 /** enclave -> loader */
@@ -101,6 +103,12 @@ export type EnclaveToHost =
   | { kind: 'pl:stopped' }
   /** Result of a pl:capture-identity request, matched by `id`. */
   | { kind: 'pl:identity-captured'; id: string; ok: boolean; error?: string }
+  /**
+   * Ingest was rejected as unauthenticated — almost always an expired session
+   * token. Raised once per auth failure streak, not per request, so the host is
+   * told promptly without being flooded.
+   */
+  | { kind: 'pl:auth-expired'; message: string }
   | { kind: 'pl:error'; message: string };
 
 export const MSG = {
@@ -109,6 +117,8 @@ export const MSG = {
   STOP: 'pl:stop',
   CAPTURE_IDENTITY: 'pl:capture-identity',
   BEGIN_CAPTURE: 'pl:begin-capture',
+  UPDATE_TOKEN: 'pl:update-token',
+  AUTH_EXPIRED: 'pl:auth-expired',
   IDENTITY_CAPTURED: 'pl:identity-captured',
   READY: 'pl:ready',
   PERMISSION: 'pl:permission',

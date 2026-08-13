@@ -71,6 +71,14 @@ export type SessionEventMap = {
   event: ProctorEvent;
   /** A non-fatal SDK error. */
   error: { message: string };
+  /**
+   * The session token is no longer accepted — it has expired, or was revoked.
+   *
+   * Proctoring data is being queued, not delivered. Mint a fresh token for the
+   * SAME session and pass it to `updateToken()`; do not stop the session and
+   * start a new one, which would split the attempt into two reports.
+   */
+  'token-expired': { message: string };
 };
 
 type Listener<T> = (payload: T) => void;
@@ -106,6 +114,7 @@ export class ProctorSession {
     permission: new Set(),
     event: new Set(),
     error: new Set(),
+    'token-expired': new Set(),
   };
 
   private readonly onMessage = (e: MessageEvent) => this.handleEnclaveMessage(e);
@@ -216,6 +225,27 @@ export class ProctorSession {
     this.postToEnclave({ kind: 'pl:begin-capture' });
   }
 
+  /**
+   * Replace the session token without interrupting the attempt.
+   *
+   * Use this when you receive `token-expired`, or proactively before a long
+   * exam outruns its token. Mint a new token for the **same** session — call
+   * `POST /v1/sessions` again with the same `attempt_id` and it resumes,
+   * returning the same `session_id` with a fresh `session_jwt`.
+   *
+   * Queued events that failed under the old token are flushed straight away, so
+   * nothing recorded during the gap is lost.
+   *
+   * Do NOT stop the session and start a new one instead: that ends the attempt
+   * server-side, and the next mint creates a separate session and report.
+   */
+  updateToken(jwt: string): void {
+    if (!jwt) throw new Error('[ProctorLink] updateToken requires a token');
+    if (this.stopped || !this.iframe) return;
+    this.opts.jwt = jwt;   // so a later re-init uses the current token
+    this.postToEnclave({ kind: 'pl:update-token', jwt });
+  }
+
   /** Signals the enclave to end capture and flush its queue. Keeps the iframe for a graceful stop. */
   stop(): void {
     if (this.stopped) return;
@@ -321,6 +351,9 @@ export class ProctorSession {
         }
         break;
       }
+      case MSG.AUTH_EXPIRED:
+        this.emit('token-expired', { message: msg.message });
+        break;
       case MSG.STOPPED:
         // Enclave finished flushing + ending — safe to remove the iframe now.
         if (this.destroyRequested) this.finalizeDestroy();

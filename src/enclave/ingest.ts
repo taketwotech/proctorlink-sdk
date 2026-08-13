@@ -24,15 +24,41 @@ interface PresignResponse {
   key: string;
 }
 
+/** Thrown when the backend rejects our credentials (expired/invalid token). */
+export class IngestAuthError extends Error {
+  constructor(readonly status: number) {
+    super(`ingest rejected with ${status}`);
+    this.name = 'IngestAuthError';
+  }
+}
+
 export class IngestClient {
   private queue: ProctorEvent[] = [];
   private flushing = false;
+  /** Not readonly: the host can hand us a fresh token mid-session. */
+  private jwt: string;
+  /**
+   * Cap the retained backlog. Every failed flush re-queues its batch, and
+   * heartbeats keep arriving — without a cap an expired token would grow this
+   * array for the rest of the exam. Oldest events are dropped first; the recent
+   * ones matter more for a report, and the sequence numbers make the loss visible.
+   */
+  private static readonly MAX_QUEUE = 2000;
 
   constructor(
     private readonly baseUrl: string,
-    private readonly jwt: string,
+    jwt: string,
     private readonly sessionId: string,
-  ) {}
+    /** Called when the backend rejects our token, so the enclave can notify the host. */
+    private readonly onAuthFailure?: (status: number) => void,
+  ) {
+    this.jwt = jwt;
+  }
+
+  /** Swap in a freshly minted token. Subsequent requests use it immediately. */
+  setToken(jwt: string) {
+    this.jwt = jwt;
+  }
 
   queueEvent(event: ProctorEvent) {
     this.queue.push(event);
@@ -45,7 +71,12 @@ export class IngestClient {
     try {
       await this.postJson('/v1/ingest/events', { sessionId: this.sessionId, events: batch });
     } catch (err) {
-      this.queue.unshift(...batch); // nothing dropped while we retry
+      // Keep the batch for the next attempt, but bound the backlog so a long
+      // auth outage cannot grow it without limit.
+      this.queue.unshift(...batch);
+      if (this.queue.length > IngestClient.MAX_QUEUE) {
+        this.queue.splice(0, this.queue.length - IngestClient.MAX_QUEUE);
+      }
       console.warn('[ProctorLink][enclave] event flush failed, will retry', err);
     } finally {
       this.flushing = false;
@@ -113,6 +144,12 @@ export class IngestClient {
       body: JSON.stringify(body),
       keepalive: true,
     });
+    if (res.status === 401 || res.status === 403) {
+      // Distinguished from ordinary failures: retrying with the same token is
+      // pointless, and the host needs to know so it can supply a new one.
+      this.onAuthFailure?.(res.status);
+      throw new IngestAuthError(res.status);
+    }
     if (!res.ok) throw new Error(`ingest ${path} -> ${res.status}`);
     return (await res.json().catch(() => ({}))) as T;
   }
