@@ -241,6 +241,22 @@ export class ProctorSession {
    */
   updateToken(jwt: string): void {
     if (!jwt) throw new Error('[ProctorLink] updateToken requires a token');
+
+    // A re-mint only resumes while the session is still active. If it had
+    // already ended (e.g. the abandonment sweep closed it after a long outage),
+    // the mint created a NEW session and this token is bound to that one.
+    // Feeding it here would make every ingest call fail with 403 "session token
+    // does not match", which in turn raises another token-expired — a loop.
+    // Fail loudly instead, so the integrator sees the real problem.
+    const tokenSessionId = decodeSessionIdFromJwt(jwt);
+    if (tokenSessionId && tokenSessionId !== this.sessionId) {
+      throw new Error(
+        `[ProctorLink] updateToken received a token for session ${tokenSessionId}, ` +
+          `but this session is ${this.sessionId}. The re-mint did not resume — ` +
+          `check that "resumed" was true and that attempt_id matched.`,
+      );
+    }
+
     if (this.stopped || !this.iframe) return;
     this.opts.jwt = jwt;   // so a later re-init uses the current token
     this.postToEnclave({ kind: 'pl:update-token', jwt });
