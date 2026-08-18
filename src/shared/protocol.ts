@@ -7,8 +7,25 @@
  * sides can never drift.
  */
 
-export const PROTOCOL_VERSION = 1;
-export const SDK_VERSION = '0.1.0';
+/**
+ * Bump whenever a message is added, removed, or changes shape. The loader checks
+ * this against the value the enclave reports in `pl:ready`, because the two are
+ * deployed independently — the loader from the customer's npm install, the
+ * enclave from our CDN — and a mismatched pair otherwise fails in total silence.
+ *
+ * History: 1 = initial. 2 = added pl:capture-identity / pl:begin-capture /
+ * pl:update-token / pl:identity-captured / pl:auth-expired (shipped in 0.1.3,
+ * without a bump — which is how a 0.1.2 enclave came to be silently dropping
+ * them in production).
+ */
+export const PROTOCOL_VERSION = 2;
+
+/**
+ * Injected at build time from package.json, so there is exactly one place a
+ * version is declared. It also selects the enclave build the loader will load.
+ */
+declare const __SDK_VERSION__: string;
+export const SDK_VERSION = __SDK_VERSION__;
 
 /**
  * The canonical proctoring event taxonomy.

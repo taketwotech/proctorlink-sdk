@@ -27,8 +27,25 @@ import {
 /**
  * Where ProctorLink hosts the enclave. Customers can omit `enclaveUrl` and get
  * this automatically; override it only for self-hosting or a different region.
+ *
+ * The path is pinned to this loader's own version. Loader and enclave speak a
+ * private postMessage protocol, and a mismatched pair fails silently — the
+ * loader posts messages an older enclave has never heard of and simply drops.
+ * Pinning makes that pairing structural rather than something a deploy has to
+ * remember to keep in step.
  */
-export const DEFAULT_ENCLAVE_URL = 'https://app-dev.proctorlink.com/enclave/enclave.html';
+export const DEFAULT_ENCLAVE_URL = `https://enclave.proctorlink.com/${SDK_VERSION}/enclave.html`;
+
+/**
+ * Where the enclave sends events and frames.
+ *
+ * Kept separate from the enclave origin: the enclave is a static asset on a CDN
+ * and the ingest API is a server, so they are no longer the same host. When a
+ * caller overrides `enclaveUrl` without naming an ingest URL we still fall back
+ * to that origin, which keeps local development (both served by a dashboard on
+ * localhost) working unchanged.
+ */
+export const DEFAULT_INGEST_BASE_URL = 'https://app-dev.proctorlink.com';
 
 export interface CreateSessionOptions {
   /** Full URL to the hosted enclave document. Defaults to ProctorLink's hosted enclave. */
@@ -37,7 +54,10 @@ export interface CreateSessionOptions {
   jwt: string;
   /** Session id. If omitted, it is decoded from the JWT payload (sid/sub). */
   sessionId?: string;
-  /** Ingest API base URL. Defaults to the origin of `enclaveUrl`. */
+  /**
+   * Ingest API base URL. Defaults to ProctorLink's API — or, if you passed your
+   * own `enclaveUrl`, to that origin.
+   */
   ingestBaseUrl?: string;
   /** Container for the small camera preview. Defaults to a floating bottom-right pip. */
   mount?: HTMLElement;
@@ -133,7 +153,14 @@ export class ProctorSession {
       enclaveUrl,
       jwt: options.jwt,
       sessionId,
-      ingestBaseUrl: options.ingestBaseUrl || enclaveOrigin,
+      // Three cases, in order. An explicit ingest URL always wins. Otherwise a
+      // caller who named their own enclave gets ingest on that same origin —
+      // that is the local-development case, where one dashboard serves both.
+      // Only when both are defaulted do the two split apart, because the hosted
+      // enclave is a CDN asset and the API is somewhere else entirely.
+      ingestBaseUrl:
+        options.ingestBaseUrl ||
+        (options.enclaveUrl ? enclaveOrigin : DEFAULT_INGEST_BASE_URL),
       frameIntervalMs: options.frameIntervalMs ?? 60000,
       heartbeatIntervalMs: options.heartbeatIntervalMs ?? 5000,
       captureAudio: options.captureAudio ?? false,
@@ -343,6 +370,19 @@ export class ProctorSession {
     switch (msg.kind) {
       case MSG.READY:
         this.ready = true;
+        // Loader and enclave ship independently — npm install vs our CDN — so a
+        // pair that does not match is entirely possible. Say so loudly: the
+        // alternative is what happened before, where a newer loader posted
+        // messages an older enclave had never heard of and dropped in silence,
+        // for months, with no error anywhere.
+        if (msg.version !== PROTOCOL_VERSION) {
+          this.emit('error', {
+            message:
+              `[ProctorLink] enclave protocol v${msg.version} does not match loader v${PROTOCOL_VERSION}. ` +
+              `The enclave at ${this.opts.enclaveUrl} is not the one this SDK (${SDK_VERSION}) expects — ` +
+              `features may silently do nothing. Check any enclaveUrl override.`,
+          });
+        }
         this.postToEnclave({
           kind: 'pl:init',
           version: PROTOCOL_VERSION,
