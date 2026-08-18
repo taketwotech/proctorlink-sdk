@@ -58,12 +58,22 @@ class Enclave {
       this.emit(document.hidden ? 'tab.hidden' : 'tab.visible', 'enclave');
     });
 
-    // Safety net: whenever the enclave is torn down (Stop, navigation, tab close,
-    // or the iframe being removed), end the session. The keepalive fetch in
-    // endSession() survives unload, and /end is idempotent, so this can double
-    // up harmlessly with the explicit stop() path — a session never stays 'active'.
+    // Teardown: flush what we have, but do NOT end the session.
+    //
+    // 'pagehide' is far broader than "the candidate finished". It also fires on
+    // an ordinary navigation (a multi-step form moving off the attempt page), on
+    // entering the bfcache via back/forward, and on iOS Safari whenever the tab
+    // is backgrounded or the user switches apps. Ending here made every one of
+    // those permanent: /end sets status 'ended', and a re-mint only resumes a
+    // session that is still 'active', so returning to the exam silently started
+    // a NEW session. One attempt would fragment into several part-reports, each
+    // with its own identity photo, its own verdict, and its own billed credit.
+    //
+    // Genuine abandonment is SessionTimeoutCron's job — it ends sessions after a
+    // long window of total silence, tagged endReason 'timeout'. Explicit stop()
+    // remains the clean-finish path.
     window.addEventListener('pagehide', () => {
-      if (this.config) void this.ingest?.endSession();
+      if (this.config) this.ingest?.flushBeacon();
     });
 
     // The enclave owns the media devices, so it is the place to notice a camera
@@ -205,7 +215,19 @@ class Enclave {
       (status) => this.onAuthFailure(status),
     );
 
-    this.emit('session.started', 'enclave', { sdkProtocol: PROTOCOL_VERSION });
+    // Pick up numbering where this session left off. On a fresh session this is
+    // 1; on one we are rejoining after a tab close or a host-page navigation it
+    // is past everything already recorded, so our frames append instead of
+    // upserting over the earlier evidence (frame rows are keyed sessionId+seq).
+    // Must happen before the first emit — session.started takes a seq.
+    const nextSeq = await this.ingest.resumePoint();
+    this.seq = nextSeq - 1;
+    const isRejoin = nextSeq > 1;
+
+    this.emit('session.started', 'enclave', {
+      sdkProtocol: PROTOCOL_VERSION,
+      ...(isRejoin ? { rejoined: true, resumedFromSeq: nextSeq } : {}),
+    });
 
     // Event flush loop (runs regardless of camera outcome).
     this.flushTimer = window.setInterval(() => void this.ingest?.flushEvents(), EVENT_FLUSH_INTERVAL_MS);

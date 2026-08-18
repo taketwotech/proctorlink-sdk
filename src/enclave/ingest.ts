@@ -134,6 +134,42 @@ export class IngestClient {
     await this.postJson(`/v1/sessions/${this.sessionId}/end`, {}).catch(() => undefined);
   }
 
+  /**
+   * Where to start numbering. 1 for a new session; on a session we are rejoining
+   * after a tab close or a host-page navigation, the seq after the last one
+   * already recorded — restarting at 1 would upsert over that evidence.
+   *
+   * Best effort: if this fails we fall back to 1 rather than blocking the exam.
+   */
+  async resumePoint(): Promise<number> {
+    try {
+      const res = await fetch(
+        `${this.baseUrl.replace(/\/$/, '')}/v1/sessions/${this.sessionId}/resume`,
+        { headers: { authorization: `Bearer ${this.jwt}` } },
+      );
+      if (!res.ok) return 1;
+      const body = (await res.json()) as { next_seq?: number };
+      return typeof body.next_seq === 'number' && body.next_seq > 0 ? body.next_seq : 1;
+    } catch {
+      return 1;
+    }
+  }
+
+  /**
+   * Best-effort flush on teardown. Unlike flushEvents() this bypasses the
+   * in-flight guard and does not re-queue on failure — the page is going away,
+   * so there is no later flush to retry into. `keepalive` lets the request
+   * outlive the document.
+   */
+  flushBeacon(): void {
+    if (this.queue.length === 0) return;
+    const batch = this.queue.splice(0, this.queue.length);
+    void this.postJson('/v1/ingest/events', {
+      sessionId: this.sessionId,
+      events: batch,
+    }).catch(() => undefined);
+  }
+
   private async postJson<T = unknown>(path: string, body: unknown): Promise<T> {
     const res = await fetch(this.baseUrl.replace(/\/$/, '') + path, {
       method: 'POST',
