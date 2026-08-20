@@ -364,16 +364,21 @@ export class ProctorSession {
   private defaultPip(): HTMLElement {
     const pip = document.createElement('div');
     pip.dataset['plPip'] = '1';
-    pip.style.cssText =
-      'position:fixed;bottom:16px;right:16px;width:180px;height:135px;z-index:2147483647;box-shadow:0 4px 16px rgba(0,0,0,.25);border-radius:8px;overflow:hidden;background:#000;touch-action:none;user-select:none;';
 
-    if (this.opts.draggable && this.opts.showPreview !== false) {
-      const handle = document.createElement('div');
-      handle.dataset['plDrag'] = '1';
-      handle.style.cssText =
-        'position:absolute;inset:0;z-index:10;cursor:grab;touch-action:none;user-select:none;';
-      pip.appendChild(handle);
-      this.pipCleanup = this.makeDraggable(pip, handle);
+    if (this.opts.showPreview) {
+      pip.style.cssText =
+        'position:fixed;bottom:16px;right:16px;width:180px;height:135px;z-index:2147483647;box-shadow:0 4px 16px rgba(0,0,0,.25);border-radius:8px;overflow:hidden;background:#000;';
+
+      if (this.opts.draggable) {
+        const handle = document.createElement('div');
+        handle.dataset['plDrag'] = '1';
+        handle.style.cssText =
+          'position:absolute;inset:0;z-index:10;cursor:grab;touch-action:none;user-select:none;';
+        pip.appendChild(handle);
+        this.pipCleanup = this.makeDraggable(pip, handle);
+      }
+    } else {
+      pip.style.cssText = 'position:fixed;width:1px;height:1px;border:0;left:-9999px;';
     }
 
     document.body.appendChild(pip);
@@ -387,32 +392,6 @@ export class ProctorSession {
     let initialTop = 0;
     let isDragging = false;
     let activePointerId: number | null = null;
-
-    const onPointerDown = (e: PointerEvent) => {
-      if (e.button !== 0 && e.pointerType === 'mouse') return;
-
-      const rect = pip.getBoundingClientRect();
-      // Lock rendered coordinates to left/top before dragging starts
-      pip.style.bottom = 'auto';
-      pip.style.right = 'auto';
-      pip.style.left = `${rect.left}px`;
-      pip.style.top = `${rect.top}px`;
-
-      startX = e.clientX;
-      startY = e.clientY;
-      initialLeft = rect.left;
-      initialTop = rect.top;
-      isDragging = true;
-      activePointerId = e.pointerId;
-
-      handle.style.cursor = 'grabbing';
-      try {
-        handle.setPointerCapture(e.pointerId);
-      } catch {
-        // pointer capture fallback
-      }
-      e.preventDefault();
-    };
 
     const onPointerMove = (e: PointerEvent) => {
       if (!isDragging || (activePointerId !== null && e.pointerId !== activePointerId)) return;
@@ -444,6 +423,40 @@ export class ProctorSession {
       } catch {
         // ignore
       }
+
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+    };
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.button !== 0 && e.pointerType === 'mouse') return;
+
+      const rect = pip.getBoundingClientRect();
+      // Lock rendered coordinates to left/top before dragging starts
+      pip.style.bottom = 'auto';
+      pip.style.right = 'auto';
+      pip.style.left = `${rect.left}px`;
+      pip.style.top = `${rect.top}px`;
+
+      startX = e.clientX;
+      startY = e.clientY;
+      initialLeft = rect.left;
+      initialTop = rect.top;
+      isDragging = true;
+      activePointerId = e.pointerId;
+
+      handle.style.cursor = 'grabbing';
+      try {
+        handle.setPointerCapture(e.pointerId);
+      } catch {
+        // capture may fail in non-standard environments; window listeners handle it
+      }
+
+      window.addEventListener('pointermove', onPointerMove);
+      window.addEventListener('pointerup', onPointerUp);
+      window.addEventListener('pointercancel', onPointerUp);
+      e.preventDefault();
     };
 
     const onResize = () => {
@@ -459,16 +472,13 @@ export class ProctorSession {
     };
 
     handle.addEventListener('pointerdown', onPointerDown);
-    handle.addEventListener('pointermove', onPointerMove);
-    handle.addEventListener('pointerup', onPointerUp);
-    handle.addEventListener('pointercancel', onPointerUp);
     window.addEventListener('resize', onResize);
 
     return () => {
       handle.removeEventListener('pointerdown', onPointerDown);
-      handle.removeEventListener('pointermove', onPointerMove);
-      handle.removeEventListener('pointerup', onPointerUp);
-      handle.removeEventListener('pointercancel', onPointerUp);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
       window.removeEventListener('resize', onResize);
     };
   }
