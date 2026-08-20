@@ -80,14 +80,13 @@ handled by ProctorLink.
 
 `ProctorLink.createSession(options)` takes the two values from your mint response:
 
-| Option      | Default            | Description |
-|-------------|--------------------|-------------|
-| `jwt`       | **required**       | The `session_jwt` returned by `POST /v1/sessions`. |
-| `sessionId` | decoded from `jwt` | The `session_id` from the same response. Optional — read from the JWT if omitted. |
-
-Optional display overrides are available if you need them — `mount` (the element to
-place the camera preview in) and `showPreview` (`false` hides it). The defaults suit
-most integrations.
+| Option        | Default            | Description |
+|---------------|--------------------|-------------|
+| `jwt`         | **required**       | The `session_jwt` returned by `POST /v1/sessions`. |
+| `sessionId`   | decoded from `jwt` | The `session_id` from the same response. Optional — read from the JWT if omitted. |
+| `draggable`   | `true`             | Allows candidates to drag and reposition the camera preview anywhere on screen. |
+| `showPreview` | `true`             | Show the camera preview pip. Set `false` to hide it completely. |
+| `mount`       | floating pip       | Custom container element for the camera preview. |
 
 ## API
 
