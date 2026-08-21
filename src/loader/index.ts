@@ -70,6 +70,11 @@ export interface CreateSessionOptions {
   /** Show the camera preview pip. Default true. When false the iframe is 1×1 and hidden. */
   showPreview?: boolean;
   /**
+   * Allow candidate to drag and reposition the camera preview anywhere on screen.
+   * Default true when using the default floating pip preview.
+   */
+  draggable?: boolean;
+  /**
    * Begin recording keyframes as soon as the camera is granted. Default true.
    *
    * Leave it alone for the usual flow: `start()` and the exam is being recorded,
@@ -128,6 +133,7 @@ export class ProctorSession {
   >();
   private captureSeq = 0;
   private destroyTimer = 0;
+  private pipCleanup: (() => void) | null = null;
 
   private readonly listeners: { [K in keyof SessionEventMap]: Set<Listener<SessionEventMap[K]>> } = {
     ready: new Set(),
@@ -165,6 +171,7 @@ export class ProctorSession {
       heartbeatIntervalMs: options.heartbeatIntervalMs ?? 5000,
       captureAudio: options.captureAudio ?? false,
       showPreview: options.showPreview ?? true,
+      draggable: options.draggable ?? true,
       // Default true keeps the existing one-call flow working unchanged.
       autoStartCapture: options.autoStartCapture ?? true,
       mount: options.mount,
@@ -325,11 +332,15 @@ export class ProctorSession {
       window.clearTimeout(this.destroyTimer);
       this.destroyTimer = 0;
     }
+    if (this.pipCleanup) {
+      this.pipCleanup();
+      this.pipCleanup = null;
+    }
     window.removeEventListener('message', this.onMessage);
     if (this.iframe) {
       const pip = this.iframe.parentElement;
       this.iframe.remove();
-      if (pip && pip.dataset.plPip === '1') pip.remove();
+      if (pip && pip.dataset['plPip'] === '1') pip.remove();
       this.iframe = null;
     }
   }
@@ -352,11 +363,124 @@ export class ProctorSession {
 
   private defaultPip(): HTMLElement {
     const pip = document.createElement('div');
-    pip.dataset.plPip = '1';
-    pip.style.cssText =
-      'position:fixed;bottom:16px;right:16px;z-index:2147483647;box-shadow:0 4px 16px rgba(0,0,0,.25);border-radius:8px;overflow:hidden;background:#000;';
+    pip.dataset['plPip'] = '1';
+
+    if (this.opts.showPreview) {
+      pip.style.cssText =
+        'position:fixed;bottom:16px;right:16px;width:180px;height:135px;z-index:2147483647;box-shadow:0 4px 16px rgba(0,0,0,.25);border-radius:8px;overflow:hidden;background:#000;';
+
+      if (this.opts.draggable) {
+        const handle = document.createElement('div');
+        handle.dataset['plDrag'] = '1';
+        handle.style.cssText =
+          'position:absolute;inset:0;z-index:10;cursor:grab;touch-action:none;user-select:none;';
+        pip.appendChild(handle);
+        this.pipCleanup = this.makeDraggable(pip, handle);
+      }
+    } else {
+      pip.style.cssText = 'position:fixed;width:1px;height:1px;border:0;left:-9999px;';
+    }
+
     document.body.appendChild(pip);
     return pip;
+  }
+
+  private makeDraggable(pip: HTMLElement, handle: HTMLElement): () => void {
+    let startX = 0;
+    let startY = 0;
+    let initialLeft = 0;
+    let initialTop = 0;
+    let isDragging = false;
+    let activePointerId: number | null = null;
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (!isDragging || (activePointerId !== null && e.pointerId !== activePointerId)) return;
+
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+
+      const maxLeft = Math.max(0, window.innerWidth - pip.offsetWidth);
+      const maxTop = Math.max(0, window.innerHeight - pip.offsetHeight);
+
+      const nextLeft = Math.max(0, Math.min(initialLeft + dx, maxLeft));
+      const nextTop = Math.max(0, Math.min(initialTop + dy, maxTop));
+
+      pip.style.left = `${nextLeft}px`;
+      pip.style.top = `${nextTop}px`;
+      e.preventDefault();
+    };
+
+    const onPointerUp = (e: PointerEvent) => {
+      if (!isDragging || (activePointerId !== null && e.pointerId !== activePointerId)) return;
+      isDragging = false;
+      activePointerId = null;
+
+      handle.style.cursor = 'grab';
+      try {
+        if (handle.hasPointerCapture(e.pointerId)) {
+          handle.releasePointerCapture(e.pointerId);
+        }
+      } catch {
+        // ignore
+      }
+
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+    };
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.button !== 0 && e.pointerType === 'mouse') return;
+
+      const rect = pip.getBoundingClientRect();
+      // Lock rendered coordinates to left/top before dragging starts
+      pip.style.bottom = 'auto';
+      pip.style.right = 'auto';
+      pip.style.left = `${rect.left}px`;
+      pip.style.top = `${rect.top}px`;
+
+      startX = e.clientX;
+      startY = e.clientY;
+      initialLeft = rect.left;
+      initialTop = rect.top;
+      isDragging = true;
+      activePointerId = e.pointerId;
+
+      handle.style.cursor = 'grabbing';
+      try {
+        handle.setPointerCapture(e.pointerId);
+      } catch {
+        // capture may fail in non-standard environments; window listeners handle it
+      }
+
+      window.addEventListener('pointermove', onPointerMove);
+      window.addEventListener('pointerup', onPointerUp);
+      window.addEventListener('pointercancel', onPointerUp);
+      e.preventDefault();
+    };
+
+    const onResize = () => {
+      if (!pip.parentElement) return;
+      const rect = pip.getBoundingClientRect();
+      const maxLeft = Math.max(0, window.innerWidth - rect.width);
+      const maxTop = Math.max(0, window.innerHeight - rect.height);
+
+      if (rect.left > maxLeft || rect.top > maxTop) {
+        pip.style.left = `${Math.max(0, Math.min(rect.left, maxLeft))}px`;
+        pip.style.top = `${Math.max(0, Math.min(rect.top, maxTop))}px`;
+      }
+    };
+
+    handle.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('resize', onResize);
+
+    return () => {
+      handle.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+      window.removeEventListener('resize', onResize);
+    };
   }
 
   private handleEnclaveMessage(e: MessageEvent) {
