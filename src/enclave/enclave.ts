@@ -58,6 +58,13 @@ class Enclave {
     window.addEventListener('message', (e) => this.onMessage(e));
     document.addEventListener('visibilitychange', () => {
       // visibilityState is inherited from the top-level tab, so this fires on tab switch.
+      //
+      // Suppressed while paused. The loader detaches its own host listeners on
+      // pause, but this one lives in the enclave and was still firing — and
+      // tab.hidden is a scored FLAG_TYPE, so a paused candidate was still losing
+      // integrity points for switching tabs on a page they had legitimately been
+      // sent to. That defeats the entire purpose of pausing.
+      if (this.paused) return;
       this.emit(document.hidden ? 'tab.hidden' : 'tab.visible', 'enclave');
     });
 
@@ -82,7 +89,9 @@ class Enclave {
     // The enclave owns the media devices, so it is the place to notice a camera
     // being unplugged / a virtual camera being switched in mid-exam.
     navigator.mediaDevices?.addEventListener('devicechange', () => {
-      if (!this.config) return;
+      // Same reasoning as visibilitychange above: nothing is being captured while
+      // paused, so a device swap is not evidence about this attempt.
+      if (!this.config || this.paused) return;
       navigator.mediaDevices
         .enumerateDevices()
         .then((devices) => {
@@ -123,7 +132,7 @@ class Enclave {
     } else if (msg.kind === MSG.PAUSE) {
       this.pause();
     } else if (msg.kind === MSG.RESUME) {
-      this.resume();
+      void this.resume();
     } else if (msg.kind === MSG.UPDATE_TOKEN) {
       this.ingest?.setToken(msg.jwt);
       // Re-arm so a later expiry is reported again, and flush straight away:
@@ -131,7 +140,9 @@ class Enclave {
       this.authFailureNotified = false;
       void this.ingest?.flushEvents();
     } else if (msg.kind === MSG.STOP) {
-      void this.stop();
+      // Absent flag means end, so an older host that never sends it keeps the
+      // behaviour it has always had.
+      void this.stop(msg.endSession !== false);
     }
   }
 
@@ -232,21 +243,59 @@ class Enclave {
     window.clearInterval(this.frameTimer);
     this.frameTimer = 0;
     this.paused = true;
+
+    // Release the camera. The first cut kept the stream open so resume would be
+    // instant, which left the browser's recording indicator lit and a live
+    // preview on screen for a candidate who had been sent elsewhere — it read as
+    // "still watching me". getUserMedia does not re-prompt once an origin holds
+    // permission, so the real cost of releasing is a few hundred ms of warm-up.
+    this.stream?.getTracks().forEach((t) => t.stop());
+    this.stream = null;
+    this.video.srcObject = null;
+
     this.setStatus('paused');
     this.emit('session.paused', 'enclave');
   }
 
+  /**
+   * Re-open the camera after pause. Deliberately not requestCamera(): that emits
+   * camera.granted and honours autoStartCapture, both of which are wrong here —
+   * permission was already granted and whether to record is wasCapturing's call.
+   */
+  private async reacquireCamera(): Promise<boolean> {
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user' },
+        audio: this.config!.captureAudio,
+      });
+      this.video.srcObject = this.stream;
+      await this.video.play().catch(() => undefined);
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.emit('camera.denied', 'enclave', { error: message });
+      this.setStatus('camera unavailable');
+      return false;
+    }
+  }
+
   /** Resume capture after pause(). No-op unless currently paused. */
-  private resume(): void {
+  private async resume(): Promise<void> {
     if (!this.config || !this.paused) return;
     this.paused = false;
     this.emit('session.resumed', 'enclave');
+
+    // Camera first — beginCapture() no-ops without a stream, so arming the timer
+    // before the device is back would leave capture silently dead.
+    const ok = await this.reacquireCamera();
+    if (!ok) return;
+
     if (this.wasCapturing) {
       // beginCapture() is idempotent and re-arms the timer; it also takes the
       // first frame only once the camera is producing pixels again.
       this.beginCapture();
     } else {
-      this.setStatus('recording');
+      this.setStatus('ready — waiting to start');
     }
   }
 
@@ -397,17 +446,31 @@ class Enclave {
     );
   }
 
-  private async stop() {
+  /**
+   * Tear the enclave down. With `endSession` false this is a *local* teardown:
+   * timers stopped, camera released, queue flushed — but no /end, so the attempt
+   * stays active and a later re-mint resumes it rather than starting a new one.
+   *
+   * That is deliberately the same shape as what a page refresh already does via
+   * pagehide. A host unmounting its own component (an SPA route change, the back
+   * button) needs the refresh outcome without an actual refresh.
+   *
+   * session.stopped is only emitted when the session really is stopping —
+   * otherwise the report would show an attempt ending several times.
+   */
+  private async stop(endSession = true) {
     window.clearInterval(this.frameTimer);
     window.clearInterval(this.heartbeatTimer);
     window.clearInterval(this.flushTimer);
+    this.frameTimer = 0;
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;
-    this.setStatus('stopped');
-    this.emit('session.stopped', 'enclave');
+    this.video.srcObject = null;
+    this.setStatus(endSession ? 'stopped' : 'detached');
+    if (endSession) this.emit('session.stopped', 'enclave');
     await this.ingest?.flushEvents();
-    await this.ingest?.endSession();
-    // Tell the loader we've flushed + ended, so it can safely remove the iframe.
+    if (endSession) await this.ingest?.endSession();
+    // Tell the loader we've flushed, so it can safely remove the iframe.
     this.postUp({ kind: 'pl:stopped' });
   }
 

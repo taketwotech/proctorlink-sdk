@@ -18,7 +18,7 @@
  * without a bump — which is how a 0.1.2 enclave came to be silently dropping
  * them in production).
  */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 /**
  * Injected at build time from package.json, so there is exactly one place a
@@ -118,7 +118,14 @@ export type HostToEnclave =
   | { kind: 'pl:update-token'; jwt: string }
   | { kind: 'pl:pause' }
   | { kind: 'pl:resume' }
-  | { kind: 'pl:stop' };
+  /**
+   * `endSession` false tears the enclave down locally — timers, camera, queue
+   * flush — without POSTing /end, so the attempt stays active and a later
+   * re-mint resumes it. This is what a page refresh already does implicitly via
+   * pagehide; the flag makes it available to a host that is unmounting its own
+   * component instead. Defaults to true.
+   */
+  | { kind: 'pl:stop'; endSession?: boolean };
 
 /** enclave -> loader */
 export type EnclaveToHost =

@@ -299,6 +299,9 @@ export class ProctorSession {
     // exactly the ones the integrity score penalises.
     this.detachHostHandlers();
     this.postToEnclave({ kind: 'pl:pause' });
+    // Hide the preview too. The enclave releases the camera, so leaving the box
+    // on screen would show a dead black rectangle and still read as "watching".
+    this.setPreviewVisible(false);
   }
 
   /**
@@ -317,6 +320,21 @@ export class ProctorSession {
     this.paused = false;
     this.attachHostHandlers();
     this.postToEnclave({ kind: 'pl:resume' });
+    this.setPreviewVisible(true);
+  }
+
+  /**
+   * Show/hide the camera preview. Targets the pip we created, or the host's own
+   * `mount` element when one was supplied — in the mount case we toggle the
+   * iframe rather than the container, since the container belongs to the host and
+   * may hold their own chrome.
+   */
+  private setPreviewVisible(visible: boolean): void {
+    if (!this.iframe) return;
+    const pip = this.iframe.parentElement;
+    const target =
+      pip && pip.dataset['plPip'] === '1' ? (pip as HTMLElement) : this.iframe;
+    target.style.display = visible ? '' : 'none';
   }
 
   /**
@@ -356,8 +374,15 @@ export class ProctorSession {
     this.postToEnclave({ kind: 'pl:update-token', jwt });
   }
 
-  /** Signals the enclave to end capture and flush its queue. Keeps the iframe for a graceful stop. */
+  /**
+   * Ends the attempt. Signals the enclave to end capture, flush its queue and
+   * POST /end. Terminal — a later re-mint creates a NEW session, not a resume.
+   */
   stop(): void {
+    this.teardown(true);
+  }
+
+  private teardown(endSession: boolean): void {
     if (this.stopped) return;
     this.stopped = true;
     // Settle any in-flight captureIdentity() now rather than leaving the caller
@@ -367,19 +392,40 @@ export class ProctorSession {
       pending.reject(new Error('session stopped before the photo was stored'));
     }
     this.pendingCaptures.clear();
-    this.postToEnclave({ kind: 'pl:stop' });
+    this.postToEnclave({ kind: 'pl:stop', endSession });
     this.detachHostHandlers();
   }
 
   /**
-   * Tears everything down. Signals the enclave to stop, then waits for it to
-   * flush events + send `/end` (the `pl:stopped` ack) before removing the iframe.
-   * Falls back to removing after 3s if no ack arrives, so it can never hang.
+   * Tears everything down — camera released, preview removed, iframe removed.
+   * Waits for the enclave to flush (the `pl:stopped` ack) before removing the
+   * iframe, falling back after 3s so it can never hang.
+   *
+   * `endSession` defaults to true, which also POSTs `/end` and closes the attempt.
+   *
+   * ```ts
+   * session.destroy({ endSession: false });
+   * ```
+   *
+   * keeps the attempt **active** while removing everything from the page. Use it
+   * when your own component unmounts but the candidate has not finished — an SPA
+   * route change, a back button. It is the same outcome a page refresh already
+   * produces, which is why returning works the same way:
+   *
+   *   1. re-mint with the same `attempt_id` → `resumed: true`, same `session_id`
+   *   2. `createSession()` + `start()` → the enclave rejoins and continues
+   *      sequencing from where it left off
+   *
+   * The identity reference and all recorded evidence survive; nothing is
+   * re-captured and no second report or credit is created.
+   *
+   * Plain `destroy()` ends the attempt. A re-mint after that creates a NEW
+   * session, splitting one attempt into several reports.
    */
-  destroy(): void {
+  destroy(opts?: { endSession?: boolean }): void {
     if (this.destroyRequested) return;
     this.destroyRequested = true;
-    this.stop();
+    this.teardown(opts?.endSession !== false);
     if (!this.iframe) {
       this.finalizeDestroy();
       return;
