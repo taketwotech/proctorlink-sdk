@@ -125,6 +125,7 @@ export class ProctorSession {
   private iframe: HTMLIFrameElement | null = null;
   private ready = false;
   private stopped = false;
+  private paused = false;
   private destroyRequested = false;
   /** In-flight captureIdentity() calls, keyed by the id sent to the enclave. */
   private readonly pendingCaptures = new Map<
@@ -257,6 +258,65 @@ export class ProctorSession {
   beginCapture(): void {
     if (this.stopped || !this.iframe) return;
     this.postToEnclave({ kind: 'pl:begin-capture' });
+  }
+
+  /** True between pause() and resume(). */
+  get isPaused(): boolean {
+    return this.paused;
+  }
+
+  /**
+   * Suspend proctoring without ending the attempt.
+   *
+   * Stops keyframe capture and stops forwarding host-page signals (tab switches,
+   * clipboard, fullscreen, right-click, resize). The session stays `active`
+   * server-side — no `/end` is sent — and heartbeats keep flowing, so the
+   * abandonment sweep will not close it while paused.
+   *
+   * Call it when the candidate leaves the exam surface but the attempt is still
+   * open: a back-button route change in a single-page app, a modal that navigates
+   * away, a deliberate "take a break" step. Pair every pause() with resume().
+   *
+   * Why this is not just stop(): stop() ends the attempt server-side and cannot
+   * be undone. A re-mint after stop() creates a NEW session with its own report
+   * and its own billed credit, fragmenting one attempt into several.
+   *
+   * A `session.paused` event is recorded, so the resulting gap in the frame
+   * timeline is explained rather than looking like enclave interference. Neither
+   * `session.paused` nor `session.resumed` counts against the integrity score.
+   *
+   * The camera stays open while paused (the browser's capture indicator will
+   * remain lit) so that resume() is instant and cannot re-prompt for permission
+   * mid-attempt. Use destroy() if you need the camera released.
+   *
+   * No-op if the session has stopped, has not started, or is already paused.
+   */
+  pause(): void {
+    if (this.stopped || this.paused || !this.iframe) return;
+    this.paused = true;
+    // Detach first: a tab.hidden or clipboard event fired between the postMessage
+    // and the enclave handling it would still be recorded, and those types are
+    // exactly the ones the integrity score penalises.
+    this.detachHostHandlers();
+    this.postToEnclave({ kind: 'pl:pause' });
+  }
+
+  /**
+   * Resume after pause(). Re-attaches host-page listeners and restarts keyframe
+   * capture, recording a `session.resumed` event.
+   *
+   * If the session was paused before capture had ever begun (created with
+   * `autoStartCapture: false`, paused during the identity step), this restores
+   * the camera-on-but-not-recording state rather than starting the recording —
+   * call beginCapture() for that, as usual.
+   *
+   * No-op if the session has stopped or is not paused.
+   */
+  resume(): void {
+    if (this.stopped || !this.paused || !this.iframe) return;
+    this.paused = false;
+    this.attachHostHandlers();
+    this.postToEnclave({ kind: 'pl:resume' });
   }
 
   /**
@@ -512,7 +572,13 @@ export class ProctorSession {
           version: PROTOCOL_VERSION,
           config: this.initConfig(),
         });
-        this.attachHostHandlers();
+        // Not while paused: pause() can land before the handshake completes (a
+        // route change during enclave load), and attaching here would leave a
+        // paused session forwarding tab/clipboard events. resume() attaches.
+        if (!this.paused) this.attachHostHandlers();
+        // Re-assert the pause to the enclave, which had no config to act on when
+        // the original pl:pause arrived and dropped it.
+        if (this.paused) this.postToEnclave({ kind: 'pl:pause' });
         this.emit('ready', undefined);
         break;
       case MSG.PERMISSION:

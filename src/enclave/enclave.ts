@@ -40,6 +40,9 @@ class Enclave {
   private seq = 0;
   private stream: MediaStream | null = null;
   private frameTimer = 0;
+  private paused = false;
+  /** Whether the frame timer was running when pause() was called. */
+  private wasCapturing = false;
   private heartbeatTimer = 0;
   private flushTimer = 0;
 
@@ -117,6 +120,10 @@ class Enclave {
       void this.captureIdentity(msg.id);
     } else if (msg.kind === MSG.BEGIN_CAPTURE) {
       this.beginCapture();
+    } else if (msg.kind === MSG.PAUSE) {
+      this.pause();
+    } else if (msg.kind === MSG.RESUME) {
+      this.resume();
     } else if (msg.kind === MSG.UPDATE_TOKEN) {
       this.ingest?.setToken(msg.jwt);
       // Re-arm so a later expiry is reported again, and flush straight away:
@@ -181,6 +188,13 @@ class Enclave {
     // truthiness check is the correct "already running" test — `!= null` would
     // be true for 0 and capture would never start.
     if (this.frameTimer || !this.stream) return;
+    // While paused, remember the host's intent instead of acting on it: a
+    // beginCapture() arriving mid-pause (identity step finished off-route) must
+    // take effect on resume, not restart capture behind the pause.
+    if (this.paused) {
+      this.wasCapturing = true;
+      return;
+    }
     this.setStatus('recording');
     this.frameTimer = window.setInterval(
       () => this.captureFrame(),
@@ -189,6 +203,51 @@ class Enclave {
     // Capture the first frame only once the camera is actually producing
     // pixels — otherwise it's a black warm-up frame.
     this.captureFirstFrameWhenReady();
+  }
+
+  /**
+   * Suspend keyframe capture without ending the attempt.
+   *
+   * Only the frame timer stops. The heartbeat and flush loops keep running, and
+   * that is the whole point of the design:
+   *
+   *   - heartbeats are what keep the session out of SessionTimeoutCron's
+   *     abandonment sweep, so a pause of any length leaves status 'active';
+   *   - the flush loop drains anything still queued, so nothing recorded before
+   *     the pause is stranded in memory if the tab dies while paused.
+   *
+   * The camera stream is deliberately left open. Releasing it would make resume
+   * slow and, under some permission policies, re-prompt the candidate mid-attempt
+   * — a far worse failure than the browser's capture indicator staying lit for a
+   * page the candidate has navigated away from.
+   *
+   * `/end` is never called here. Ending is stop()'s job alone.
+   */
+  private pause(): void {
+    if (!this.config || this.paused) return;
+    // Remember whether capture was actually running: with autoStartCapture false
+    // the host may pause during the identity step, before beginCapture() was ever
+    // called. Resuming must not silently start recording in that case.
+    this.wasCapturing = this.frameTimer !== 0;
+    window.clearInterval(this.frameTimer);
+    this.frameTimer = 0;
+    this.paused = true;
+    this.setStatus('paused');
+    this.emit('session.paused', 'enclave');
+  }
+
+  /** Resume capture after pause(). No-op unless currently paused. */
+  private resume(): void {
+    if (!this.config || !this.paused) return;
+    this.paused = false;
+    this.emit('session.resumed', 'enclave');
+    if (this.wasCapturing) {
+      // beginCapture() is idempotent and re-arms the timer; it also takes the
+      // first frame only once the camera is producing pixels again.
+      this.beginCapture();
+    } else {
+      this.setStatus('recording');
+    }
   }
 
   /** Draw the current video frame to the canvas and return it as a JPEG blob. */

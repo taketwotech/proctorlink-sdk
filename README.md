@@ -11,7 +11,7 @@ also receives the live event stream, so you can react or keep your own copy.
 ## Installation
 
 ```bash
-npm install @proctorlink/sdk
+npm install @proctorlink/sdk@^0.3.0
 ```
 
 
@@ -97,8 +97,51 @@ handled by ProctorLink.
 | `start(): Promise<void>` | Mount the enclave, request the camera, begin capture. Resolves when ready. |
 | `on(type, cb): () => void` | Subscribe to `'ready'`, `'permission'`, `'event'`, or `'error'`. Returns an unsubscribe function. |
 | `onEvent(cb): () => void` | Shorthand for `on('event', …)`. |
-| `stop(): void` | End capture and flush pending data. |
+| `pause(): void` | Suspend capture **without ending the attempt**. The session stays `active`. |
+| `resume(): void` | Resume capture after `pause()`. |
+| `isPaused: boolean` | Whether the session is currently paused. |
+| `stop(): void` | End capture and flush pending data. **Ends the attempt server-side — not reversible.** |
 | `destroy(): void` | Tear down and remove the camera preview. |
+
+### Pausing an attempt
+
+`pause()` stops keyframe capture and stops forwarding host-page signals (tab
+switches, clipboard, fullscreen, right-click, resize). It does **not** end the
+attempt: no `/end` is sent, heartbeats keep flowing, and the session stays
+`active`, so the server-side abandonment sweep will not close it while paused.
+
+You decide when to pause — the SDK never pauses itself. The common case is a
+single-page app where the candidate navigates off the exam route:
+
+```ts
+// your router — you choose the trigger
+router.on('leave', '/exam', () => session.pause());
+router.on('enter', '/exam', () => session.resume());
+```
+
+Do **not** use `stop()` for this. `stop()` ends the attempt server-side, and a
+re-mint afterwards creates a *new* session with its own report, its own identity
+photo and its own billed credit — one attempt fragments into several.
+
+A `session.paused` event is recorded, and `session.resumed` on the way back, so
+the gap in the frame timeline is explained rather than looking like the candidate
+interfered with the enclave. Neither event counts against the integrity score.
+
+Two behaviours worth knowing:
+
+- **The camera stays open while paused.** The browser's capture indicator stays
+  lit. This is deliberate: releasing the stream would make `resume()` slow and,
+  under some permission policies, re-prompt the candidate mid-attempt. Use
+  `destroy()` if you need the camera actually released.
+- **Pausing before capture started keeps it stopped.** If the session was created
+  with `autoStartCapture: false` and you pause during the identity step,
+  `resume()` restores camera-on-but-not-recording rather than starting the
+  recording. Call `beginCapture()` for that, as usual.
+
+Full-page navigation is already handled without `pause()` — the enclave flushes on
+`pagehide` but deliberately does not end the session, and returning to the exam
+rejoins the same attempt. `pause()` is for the in-page case, where the enclave is
+never torn down.
 
 ### Event shape
 
@@ -117,7 +160,7 @@ interface ProctorEvent {
 
 ### Event types
 
-- **Lifecycle & media** — `session.started`, `session.stopped`, `camera.granted`,
+- **Lifecycle & media** — `session.started`, `session.stopped`, `session.paused`, `session.resumed`, `camera.granted`,
   `camera.denied`, `frame.captured`, `heartbeat`
 - **Integrity signals** — `tab.hidden`, `tab.visible`, `fullscreen.entered`,
   `fullscreen.exited`, `window.resized`, `clipboard.copy`, `clipboard.cut`,

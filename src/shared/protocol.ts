@@ -18,7 +18,7 @@
  * without a bump — which is how a 0.1.2 enclave came to be silently dropping
  * them in production).
  */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 /**
  * Injected at build time from package.json, so there is exactly one place a
@@ -37,6 +37,12 @@ export type ProctorEventType =
   // lifecycle
   | 'session.started'
   | 'session.stopped'
+  // Capture suspended/resumed by the host without ending the attempt — e.g. the
+  // candidate navigated off the exam route inside a single-page app. These
+  // explain a deliberate gap in the frame timeline, so a reviewer can tell it
+  // apart from the candidate interfering with the enclave.
+  | 'session.paused'
+  | 'session.resumed'
   // camera / media
   | 'camera.granted'
   | 'camera.denied'
@@ -110,6 +116,8 @@ export type HostToEnclave =
   | { kind: 'pl:begin-capture' }
   /** Replace the session token the enclave authenticates ingest with. */
   | { kind: 'pl:update-token'; jwt: string }
+  | { kind: 'pl:pause' }
+  | { kind: 'pl:resume' }
   | { kind: 'pl:stop' };
 
 /** enclave -> loader */
@@ -135,6 +143,8 @@ export const MSG = {
   CAPTURE_IDENTITY: 'pl:capture-identity',
   BEGIN_CAPTURE: 'pl:begin-capture',
   UPDATE_TOKEN: 'pl:update-token',
+  PAUSE: 'pl:pause',
+  RESUME: 'pl:resume',
   AUTH_EXPIRED: 'pl:auth-expired',
   IDENTITY_CAPTURED: 'pl:identity-captured',
   READY: 'pl:ready',
