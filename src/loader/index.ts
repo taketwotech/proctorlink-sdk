@@ -726,13 +726,33 @@ export class ProctorSession {
     add(window, 'pagehide', () => forward('page.unload'));
 
     // Window resize as a split-screen / snap heuristic (debounced).
+    //
+    // Only reported when the viewport actually ends up a different size. The
+    // browser fires `resize` for reasons that have nothing to do with the
+    // candidate arranging windows — most visibly on returning to a backgrounded
+    // tab, which relayouts and fires resize at the size it already was. Those
+    // showed up in reports as a `window.resized` ~400ms after every `tab.visible`,
+    // which is noise in front of whoever reviews the timeline and a false
+    // positive for the split-screen signal this is meant to be.
+    //
+    // Seeded with the size at attach time so the first event after mount (or
+    // after resume() re-attaches) is judged against reality rather than firing
+    // unconditionally.
+    let lastW = window.innerWidth;
+    let lastH = window.innerHeight;
     let resizeTimer = 0;
     add(window, 'resize', () => {
       window.clearTimeout(resizeTimer);
-      resizeTimer = window.setTimeout(
-        () => forward('window.resized', { w: window.innerWidth, h: window.innerHeight }),
-        400,
-      );
+      resizeTimer = window.setTimeout(() => {
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        // A resize away and back inside the debounce window nets to nothing, and
+        // is correctly suppressed too — no arrangement change actually happened.
+        if (w === lastW && h === lastH) return;
+        lastW = w;
+        lastH = h;
+        forward('window.resized', { w, h });
+      }, 400);
     });
   }
 
