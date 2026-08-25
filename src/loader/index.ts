@@ -701,9 +701,18 @@ export class ProctorSession {
       this.hostHandlers.push([target, name, handler]);
     };
 
-    add(document, 'visibilitychange', () =>
-      forward(document.hidden ? 'tab.hidden' : 'tab.visible'),
-    );
+    // NOT visibilitychange. The enclave listens for it too, and an iframe's
+    // visibilityState is inherited from the top-level tab — so both sides saw
+    // every tab switch and emitted their own copy. Each switch was scored twice:
+    // three real switches became six tab.hidden events and doubled the
+    // browser-activity penalty.
+    //
+    // The enclave's copy is the one worth keeping. It runs inside our own frame,
+    // so a candidate who interferes with the host page cannot suppress it, and
+    // killing the frame outright shows up as a heartbeat gap instead.
+    //
+    // Everything below stays here: the enclave genuinely cannot observe
+    // fullscreen state, clipboard use, right-click or resize on the quiz page.
     add(document, 'fullscreenchange', () =>
       forward(document.fullscreenElement ? 'fullscreen.entered' : 'fullscreen.exited'),
     );
