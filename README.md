@@ -11,7 +11,7 @@ also receives the live event stream, so you can react or keep your own copy.
 ## Installation
 
 ```bash
-npm install @proctorlink/sdk@^0.4.0
+npm install @proctorlink/sdk@^0.5.0
 ```
 
 
@@ -86,6 +86,7 @@ handled by ProctorLink.
 | `sessionId`   | decoded from `jwt` | The `session_id` from the same response. Optional — read from the JWT if omitted. |
 | `draggable`   | `true`             | Allows candidates to drag and reposition the camera preview anywhere on screen. |
 | `showPreview` | `true`             | Show the camera preview pip. Set `false` to hide it completely. |
+| `heartbeatIntervalMs` | `15000`    | Liveness cadence. Lowering it does not improve detection (gap size is decided server-side) and multiplies uploaded telemetry. Changed from `5000` in 0.5.0. |
 | `mount`       | floating pip       | Custom container element for the camera preview. |
 
 ## API
@@ -131,18 +132,20 @@ switches, clipboard, fullscreen, right-click, resize). It does **not** end the
 attempt: no `/end` is sent, heartbeats keep flowing, and the session stays
 `active`, so the server-side abandonment sweep will not close it while paused.
 
-You decide when to pause — the SDK never pauses itself. The common case is a
-single-page app where the candidate navigates off the exam route:
+You decide when to pause — the SDK never pauses itself. Use it when you want to
+stop capturing but keep the SDK mounted: a modal over the exam, a scheduled
+break.
 
 ```ts
-// your router — you choose the trigger
-router.on('leave', '/exam', () => session.pause());
-router.on('enter', '/exam', () => session.resume());
+session.pause();
+session.resume();
 ```
 
-Do **not** use `stop()` for this. `stop()` ends the attempt server-side, and a
-re-mint afterwards creates a *new* session with its own report, its own identity
-photo and its own billed credit — one attempt fragments into several.
+For an **SPA route change**, prefer `destroy({ endSession: false })` above — it
+leaves nothing mounted on a page the candidate is no longer on. And do **not**
+use `stop()` for either: it ends the attempt server-side, and a re-mint
+afterwards creates a *new* session with its own report, its own identity photo
+and its own billed credit.
 
 A `session.paused` event is recorded, and `session.resumed` on the way back, so
 the gap in the frame timeline is explained rather than looking like the candidate
@@ -158,10 +161,9 @@ Two behaviours worth knowing:
   `resume()` restores camera-on-but-not-recording rather than starting the
   recording. Call `beginCapture()` for that, as usual.
 
-Full-page navigation is already handled without `pause()` — the enclave flushes on
-`pagehide` but deliberately does not end the session, and returning to the exam
-rejoins the same attempt. `pause()` is for the in-page case, where the enclave is
-never torn down.
+Full-page navigation and refresh are already handled without either — the SDK
+flushes on `pagehide` but deliberately does not end the session, and returning to
+the exam rejoins the same attempt.
 
 ### Event shape
 
