@@ -11,7 +11,7 @@ also receives the live event stream, so you can react or keep your own copy.
 ## Installation
 
 ```bash
-npm install @proctorlink/sdk@^0.3.0
+npm install @proctorlink/sdk@^0.4.0
 ```
 
 
@@ -97,11 +97,32 @@ handled by ProctorLink.
 | `start(): Promise<void>` | Mount the enclave, request the camera, begin capture. Resolves when ready. |
 | `on(type, cb): () => void` | Subscribe to `'ready'`, `'permission'`, `'event'`, or `'error'`. Returns an unsubscribe function. |
 | `onEvent(cb): () => void` | Shorthand for `on('event', …)`. |
-| `pause(): void` | Suspend capture **without ending the attempt**. The session stays `active`. |
-| `resume(): void` | Resume capture after `pause()`. |
+| `pause(): void` | Suspend capture **without ending the attempt**, releasing the camera and hiding the preview. The session stays `active`. |
+| `resume(): void` | Resume capture after `pause()`, re-opening the camera. |
 | `isPaused: boolean` | Whether the session is currently paused. |
 | `stop(): void` | End capture and flush pending data. **Ends the attempt server-side — not reversible.** |
-| `destroy(): void` | Tear down and remove the camera preview. |
+| `destroy(opts?): void` | Tear down camera, preview and iframe. **Ends the attempt by default.** `destroy({ endSession: false })` keeps it `active` so you can resume later. |
+
+### Leaving the exam page without ending the attempt
+
+In a single-page app the candidate can navigate off the exam route without the
+page unloading. The preview is attached to `document.body`, outside your router
+outlet, so it survives and keeps capturing an empty chair — and those frames are
+scored against the candidate.
+
+Tear everything down, but keep the attempt open:
+
+```ts
+// e.g. Angular ngOnDestroy, React cleanup, router leave guard
+session.destroy({ endSession: false });
+```
+
+On return, mint with the **same `attempt_id`** (you get `resumed: true` and the
+same `session_id`) and call `createSession()` + `start()` again. The SDK rejoins,
+sequencing continues, and the identity reference and earlier evidence survive.
+
+`stop()` and a bare `destroy()` both end the attempt — a re-mint after either
+creates a *new* session with its own report and billed credit.
 
 ### Pausing an attempt
 
@@ -129,10 +150,9 @@ interfered with the enclave. Neither event counts against the integrity score.
 
 Two behaviours worth knowing:
 
-- **The camera stays open while paused.** The browser's capture indicator stays
-  lit. This is deliberate: releasing the stream would make `resume()` slow and,
-  under some permission policies, re-prompt the candidate mid-attempt. Use
-  `destroy()` if you need the camera actually released.
+- **The camera is released while paused** and the preview is hidden, so the
+  browser's capture indicator goes out. `resume()` re-opens it. (Before 0.4.0 the
+  stream was left open; it is not any more.)
 - **Pausing before capture started keeps it stopped.** If the session was created
   with `autoStartCapture: false` and you pause during the identity step,
   `resume()` restores camera-on-but-not-recording rather than starting the

@@ -63,7 +63,20 @@ export interface CreateSessionOptions {
   mount?: HTMLElement;
   /** Keyframe cadence (ms). Default 60000 (one frame/minute — the impersonation preset). */
   frameIntervalMs?: number;
-  /** Heartbeat cadence (ms). Default 5000. */
+  /**
+   * Heartbeat cadence (ms). Default 15000.
+   *
+   * Heartbeats are the liveness signal: a gap in the stream is how the server
+   * knows it lost sight of the candidate. Detection resolution is bounded by the
+   * server's gap tolerance (90s), not by this value, so 15s still gives six
+   * samples per tolerance window while storing a third as many events as the 5s
+   * this used to default to — a 3-hour attempt drops from ~2,160 heartbeats to
+   * ~720.
+   *
+   * Lowering it does not improve detection and does inflate ingest volume. The
+   * server infers the actual cadence from the stream rather than assuming one,
+   * so changing this never mis-scores a session.
+   */
   heartbeatIntervalMs?: number;
   /** Also capture the microphone. Default false. */
   captureAudio?: boolean;
@@ -169,7 +182,7 @@ export class ProctorSession {
         options.ingestBaseUrl ||
         (options.enclaveUrl ? enclaveOrigin : DEFAULT_INGEST_BASE_URL),
       frameIntervalMs: options.frameIntervalMs ?? 60000,
-      heartbeatIntervalMs: options.heartbeatIntervalMs ?? 5000,
+      heartbeatIntervalMs: options.heartbeatIntervalMs ?? 15000,
       captureAudio: options.captureAudio ?? false,
       showPreview: options.showPreview ?? true,
       draggable: options.draggable ?? true,
