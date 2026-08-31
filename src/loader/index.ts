@@ -39,13 +39,22 @@ export const DEFAULT_ENCLAVE_URL = `https://enclave.proctorlink.com/${SDK_VERSIO
 /**
  * Where the enclave sends events and frames.
  *
+ * PRODUCTION is the default, deliberately. An integrator who installs the
+ * package and passes nothing gets the live API — the safe failure is a
+ * misconfigured staging test, not a real exam silently reporting into a
+ * scratch environment. Before 1.0.0 this pointed at app-dev, which meant the
+ * opposite: forget the option in production and proctoring data went nowhere
+ * useful, with nothing to indicate it.
+ *
+ * Point somewhere else with the `ingestBaseUrl` option (see below).
+ *
  * Kept separate from the enclave origin: the enclave is a static asset on a CDN
  * and the ingest API is a server, so they are no longer the same host. When a
  * caller overrides `enclaveUrl` without naming an ingest URL we still fall back
  * to that origin, which keeps local development (both served by a dashboard on
  * localhost) working unchanged.
  */
-export const DEFAULT_INGEST_BASE_URL = 'https://app-dev.proctorlink.com';
+export const DEFAULT_INGEST_BASE_URL = 'https://api.proctorlink.com';
 
 export interface CreateSessionOptions {
   /** Full URL to the hosted enclave document. Defaults to ProctorLink's hosted enclave. */
@@ -55,8 +64,27 @@ export interface CreateSessionOptions {
   /** Session id. If omitted, it is decoded from the JWT payload (sid/sub). */
   sessionId?: string;
   /**
-   * Ingest API base URL. Defaults to ProctorLink's API — or, if you passed your
-   * own `enclaveUrl`, to that origin.
+   * Ingest API base URL. Defaults to ProctorLink's production API
+   * (`https://api.proctorlink.com`) — or, if you passed your own `enclaveUrl`,
+   * to that origin.
+   *
+   * This is how you target staging. The SDK is a browser bundle and cannot read
+   * environment variables itself, so read yours at build time and pass the value
+   * through:
+   *
+   * ```ts
+   * ProctorLink.createSession({
+   *   jwt, sessionId,
+   *   ingestBaseUrl: process.env.PROCTORLINK_API_URL,  // undefined -> production
+   * });
+   * ```
+   *
+   * `undefined` falls back to the default, so one build works for both by
+   * leaving the variable unset in production.
+   *
+   * Must be the SAME instance that minted the session: the session JWT is signed
+   * by whichever dashboard issued it and ingest verifies that signature, so
+   * minting on production and ingesting on staging fails every call with 401.
    */
   ingestBaseUrl?: string;
   /** Container for the small camera preview. Defaults to a floating bottom-right pip. */

@@ -11,7 +11,7 @@ also receives the live event stream, so you can react or keep your own copy.
 ## Installation
 
 ```bash
-npm install @proctorlink/sdk@^0.5.0
+npm install @proctorlink/sdk@^1.0.0
 ```
 
 
@@ -22,11 +22,15 @@ Integration is two steps: your server mints a session, your page starts the SDK.
 ### 1. Mint a session (server-side)
 
 Your API key is **server-side only** — never put it in the browser. From your
-backend, request a session for each attempt. Get your `access-token` /
-`secret-token` from the ProctorLink dashboard (**Developers → SDK applications**).
+backend, request a session for each attempt.
+
+**Get your keys:** sign up at
+[app.proctorlink.com](https://app.proctorlink.com/?utm_source=npmjs_portal&utm_medium=web&utm_campaign=npmjs_traffic),
+then go to **Developers → SDK applications** to create an `access-token` /
+`secret-token` pair. The secret is shown once at creation.
 
 ```http
-POST https://app-dev.proctorlink.com/v1/sessions
+POST https://api.proctorlink.com/v1/sessions
 access-token: <ACCESS_TOKEN>
 secret-token: <SECRET_TOKEN>
 content-type: application/json
@@ -87,7 +91,28 @@ handled by ProctorLink.
 | `draggable`   | `true`             | Allows candidates to drag and reposition the camera preview anywhere on screen. |
 | `showPreview` | `true`             | Show the camera preview pip. Set `false` to hide it completely. |
 | `heartbeatIntervalMs` | `15000`    | Liveness cadence. Lowering it does not improve detection (gap size is decided server-side) and multiplies uploaded telemetry. Changed from `5000` in 0.5.0. |
+| `ingestBaseUrl` | `https://api.proctorlink.com` | Where proctoring data is sent. Defaults to production — see below. |
 | `mount`       | floating pip       | Custom container element for the camera preview. |
+
+### Targeting a non-production environment
+
+`ingestBaseUrl` defaults to production, so a normal install needs no
+configuration. To point at staging, read your own environment variable at build
+time and pass it through — the SDK is a browser bundle and cannot read
+environment variables itself:
+
+```ts
+ProctorLink.createSession({
+  jwt, sessionId,
+  ingestBaseUrl: process.env.PROCTORLINK_API_URL,  // unset -> production
+});
+```
+
+Leaving the variable unset falls back to the default, so one build serves both.
+
+**It must be the same instance that minted the session.** The session JWT is
+signed by whichever dashboard issued it and ingest verifies that signature, so
+minting on production and ingesting on staging fails every call with `401`.
 
 ## API
 
@@ -201,8 +226,13 @@ event.
   your page sets a `Content-Security-Policy`, allow the enclave:
 
   ```
-  frame-src https://app-dev.proctorlink.com;
+  frame-src https://enclave.proctorlink.com;
   ```
+
+  This is the enclave host, **not** your API base URL — the two are different
+  services. The SDK loads
+  `https://enclave.proctorlink.com/<sdk-version>/enclave.html`, so the version
+  lives in the path and your policy needs no change when you upgrade.
 
 ## How it works
 
