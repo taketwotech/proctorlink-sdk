@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ProctorLink SDK — plain JavaScript</title>
+    <style>
+      body { font: 16px/1.5 system-ui, sans-serif; max-width: 42rem; margin: 3rem auto; padding: 0 1rem; }
+      button { font: inherit; padding: 0.6rem 1.1rem; }
+      #log { background: #f4f4f5; padding: 0.75rem; border-radius: 6px; height: 14rem; overflow: auto;
+             font: 13px/1.5 ui-monospace, monospace; white-space: pre-wrap; }
+      .denied { color: #b91c1c; font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <h1>Exam page</h1>
+    <p>
+      Pretend this is your exam runner. Start the attempt and the camera preview
+      appears; the event stream below is what your app receives.
+    </p>
+
+    <p>
+      <button id="start">Start attempt</button>
+      <button id="finish" disabled>Finish attempt</button>
+    </p>
+    <p id="status"></p>
+    <div id="log">waiting…</div>
+
+    <!-- Pin the exact version in production. @1 follows the 1.x line. -->
+    <script src="https://cdn.jsdelivr.net/npm/@proctorlink/sdk@1/dist/proctorlink.js"></script>
+    <script>
+      const log = (msg) => {
+        const el = document.getElementById('log');
+        el.textContent += `\n${msg}`;
+        el.scrollTop = el.scrollHeight;
+      };
+
+      // Your own identifiers. attempt_id must be the stable key of the attempt
+      // record, because re-minting with the same one resumes this session.
+      const attempt = {
+        external_user_id: 'student-local',
+        exam_id: 'demo-exam-1',
+        attempt_id: 'attempt-local-1',
+      };
+
+      // Asks OUR server to mint. The API key never reaches this page.
+      const mint = () =>
+        fetch('/api/session', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(attempt),
+        }).then((r) => {
+          if (!r.ok) throw new Error(`mint failed: ${r.status}`);
+          return r.json();
+        });
+
+      let session = null;
+
+      document.getElementById('start').addEventListener('click', async () => {
+        document.getElementById('start').disabled = true;
+        try {
+          const { session_id, session_jwt } = await mint();
+          log(`minted session ${session_id}`);
+
+          session = ProctorLink.createSession({ jwt: session_jwt, sessionId: session_id });
+
+          session.on('permission', ({ camera }) => {
+            document.getElementById('status').className = camera === 'denied' ? 'denied' : '';
+            document.getElementById('status').textContent =
+              camera === 'denied'
+                ? 'Camera denied. Block the attempt here.'
+                : 'Camera granted, recording.';
+          });
+
+          session.on('error', ({ message }) => log(`error: ${message}`));
+
+          // Long exams outrun their token. Re-mint for the SAME attempt and
+          // hand the token back; queued data flushes straight away.
+          session.on('token-expired', async () => {
+            log('token expired, re-minting');
+            const fresh = await mint();
+            session.updateToken(fresh.session_jwt);
+          });
+
+          // The stream your app can store or react to.
+          session.onEvent((e) => log(`${e.seq}  ${e.type}`));
+
+          await session.start();
+          document.getElementById('finish').disabled = false;
+          log('capture started');
+        } catch (err) {
+          log(`failed: ${err.message}`);
+          document.getElementById('start').disabled = false;
+        }
+      });
+
+      document.getElementById('finish').addEventListener('click', () => {
+        // stop() ends the attempt server-side. It is not reversible: a later
+        // mint would create a new session with its own report.
+        session.stop();
+        session.destroy();
+        document.getElementById('finish').disabled = true;
+        log('attempt ended');
+      });
+    </script>
+  </body>
+</html>

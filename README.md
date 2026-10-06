@@ -20,6 +20,18 @@ also receives the live event stream, so you can react or keep your own copy.
 npm install @proctorlink/sdk@^1.0.0
 ```
 
+No build step? Load the browser bundle from jsDelivr, which exposes a
+`ProctorLink` global:
+
+```html
+<script src="https://cdn.jsdelivr.net/npm/@proctorlink/sdk@1/dist/proctorlink.js"></script>
+<script>
+  const session = ProctorLink.createSession({ jwt: sessionJwt, sessionId });
+</script>
+```
+
+Pin the exact version in production (`@1.0.1` rather than `@1`) so a release
+never changes under a running exam.
 
 ## Quick start
 
@@ -86,6 +98,9 @@ That's the entire browser integration. Everything else — hosting the camera
 enclave, storing frames, running face analysis, generating the report — is
 handled by ProctorLink.
 
+Runnable versions of the above are in [`examples/`](./examples): a single HTML
+file with a 70-line mint server, and a React hook with the lifecycle handled.
+
 ## Configuration
 
 `ProctorLink.createSession(options)` takes the two values from your mint response:
@@ -97,6 +112,8 @@ handled by ProctorLink.
 | `draggable`   | `true`             | Allows candidates to drag and reposition the camera preview anywhere on screen. |
 | `showPreview` | `true`             | Show the camera preview pip. Set `false` to hide it completely. |
 | `heartbeatIntervalMs` | `15000`    | Liveness cadence. Lowering it does not improve detection (gap size is decided server-side) and multiplies uploaded telemetry. |
+| `autoStartCapture` | `true`        | Record keyframes as soon as the camera is granted. Set `false` for a pre-exam photo step, then call `beginCapture()`. |
+| `captureAudio` | `false`           | Also capture the microphone. |
 | `ingestBaseUrl` | `https://api.proctorlink.com` | Where proctoring data is sent. Defaults to production — see below. |
 | `mount`       | floating pip       | Custom container element for the camera preview. |
 
@@ -127,13 +144,52 @@ minting on production and ingesting on staging fails every call with `401`.
 | Method | Description |
 |--------|-------------|
 | `start(): Promise<void>` | Mount the enclave, request the camera, begin capture. Resolves when ready. |
-| `on(type, cb): () => void` | Subscribe to `'ready'`, `'permission'`, `'event'`, or `'error'`. Returns an unsubscribe function. |
+| `on(type, cb): () => void` | Subscribe to `'ready'`, `'permission'`, `'event'`, `'error'` or `'token-expired'`. Returns an unsubscribe function. |
 | `onEvent(cb): () => void` | Shorthand for `on('event', …)`. |
+| `captureIdentity(): Promise<void>` | Take the identity photo now. Resolves when it is stored; safe to call again for a retake. The image goes straight to ProctorLink and never passes through your page. |
+| `beginCapture(): void` | Start recording exam keyframes. Only needed with `autoStartCapture: false`; a no-op otherwise. |
+| `updateToken(jwt): void` | Supply a freshly minted token for the **same** session after `'token-expired'`. See below. |
 | `pause(): void` | Suspend capture **without ending the attempt**, releasing the camera and hiding the preview. The session stays `active`. |
 | `resume(): void` | Resume capture after `pause()`, re-opening the camera. |
 | `isPaused: boolean` | Whether the session is currently paused. |
 | `stop(): void` | End capture and flush pending data. **Ends the attempt server-side — not reversible.** |
 | `destroy(opts?): void` | Tear down camera, preview and iframe. **Ends the attempt by default.** `destroy({ endSession: false })` keeps it `active` so you can resume later. |
+
+### An identity photo before the exam starts
+
+By default the first captured frame is the identity reference, so nothing extra
+is needed. For an explicit photo step, bring the camera up without recording:
+
+```ts
+const session = ProctorLink.createSession({ jwt, sessionId, autoStartCapture: false });
+await session.start();          // camera on, not recording
+
+await session.captureIdentity();  // candidate presses "take photo"
+session.beginCapture();           // the exam begins
+```
+
+`captureIdentity()` rejects with the reason if the photo cannot be stored, so a
+retake can be offered rather than starting an exam with no reference image.
+
+### Exams longer than the session token
+
+Session tokens are short-lived. When one expires mid-attempt the SDK queues
+proctoring data instead of discarding it and emits `'token-expired'`. Mint a new
+token for the **same** session and hand it over:
+
+```ts
+session.on('token-expired', async () => {
+  // Same attempt_id as the original mint — the response has resumed: true
+  // and the same session_id, with a fresh session_jwt.
+  const { session_jwt } = await fetch('/api/proctoring/remint', { method: 'POST' })
+    .then((r) => r.json());
+  session.updateToken(session_jwt);
+});
+```
+
+Queued events flush as soon as the new token lands, so nothing from the gap is
+lost. Do not call `stop()` and start again: that ends the attempt and the next
+mint produces a separate session, a separate report and a separate billed credit.
 
 ### Leaving the exam page without ending the attempt
 
@@ -280,6 +336,25 @@ page's JavaScript, and SDK improvements ship without you redeploying.
 - Facial images are biometric data. Obtain the candidate's consent before
   starting a session and honor your data-retention obligations. ProctorLink
   provides configurable retention and deletion.
+
+## Versioning and support
+
+[Semantic versioning](https://semver.org/). A major version only changes when an
+integration has to be edited, and every release is listed in
+[CHANGELOG.md](./CHANGELOG.md).
+
+The current minor version receives fixes. The previous minor keeps security
+fixes for six months after its successor ships. Pre-releases go out under the
+`next` dist-tag, so `npm install @proctorlink/sdk` always resolves to a stable
+release.
+
+The enclave is version-matched to the package: each release loads
+`https://enclave.proctorlink.com/<version>/enclave.html`, older enclave versions
+stay hosted, and your `Content-Security-Policy` needs no change when you upgrade.
+
+Problems: [open an issue](https://github.com/taketwotech/proctorlink-sdk/issues).
+Security: [SECURITY.md](./SECURITY.md). Anything account-related:
+[support](https://proctorlink.com/contact?utm_source=npmjs_portal&utm_medium=web&utm_campaign=npmjs_traffic).
 
 ## License
 
