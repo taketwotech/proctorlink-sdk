@@ -1,6 +1,6 @@
 {
   "name": "@proctorlink/sdk",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Browser SDK for ProctorLink remote exam proctoring. Drops into any web assessment (React, Angular, Vue or plain JavaScript) and runs camera keyframe capture, identity checks and proctoring events inside an isolated cross-origin enclave.",
   "keywords": [
     "proctoring",
