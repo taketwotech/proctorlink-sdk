@@ -1,100 +1,112 @@
-# Publishing `@proctorlink/sdk` to npm
+# Releasing `@proctorlink/sdk`
 
-You run every command here. Nothing publishes automatically.
+Releases run from GitHub Actions on a version tag. Nothing publishes on a push
+to a branch.
 
-## 0. One-time: does the `@proctorlink` scope belong to you?
+## The order that matters
 
-The package name is **scoped** (`@proctorlink/…`). npm only lets you publish under
-a scope you own. Check https://www.npmjs.com/settings/ :
+The loader asks for an enclave pinned to its own version
+(`https://enclave.proctorlink.com/<version>/enclave.html`). **Deploy the enclave
+before the package becomes installable.** Publish first and the next customer to
+upgrade loads a 404, and no session starts. `.github/workflows/release.yml`
+refuses to publish until that URL answers 200, but the deploy itself is still a
+manual step.
 
-- If you own an org or user named `proctorlink` → good, continue.
-- If not → create a **free org** named `proctorlink` (public packages are free),
-  or rename `name` in `package.json` to a scope you own
-  (`@yourorg/proctorlink-sdk`) or an unscoped name (`proctorlink-sdk`, if free).
-
-`publishConfig.access` is already set to `public`, so the scoped package
-publishes publicly without extra flags.
-
-> If you need it **private** instead, that requires a paid npm plan; set
-> `publishConfig.access` to `restricted`, or publish to a private registry
-> (GitHub Packages / Verdaccio) via an `.npmrc`.
-
-## 1. Build + inspect what will ship
+## Cutting a release
 
 ```bash
-npm ci                 # clean install of devDeps (esbuild, typescript)
-npm run build          # esbuild bundles (loader iife/esm/cjs + enclave)
-npm run types          # emits dist/types/**/*.d.ts
-npm pack --dry-run     # lists the exact files the tarball will contain
+# 1. Update CHANGELOG.md: give the new version a date and list what changed.
+# 2. Bump the version. This commits and tags.
+npm version patch            # or minor / major
+# 3. Deploy dist/enclave to enclave.proctorlink.com/<new version>/
+# 4. Push the commit and the tag. The tag is what triggers the release.
+git push origin main --follow-tags
 ```
 
-`npm pack --dry-run` should show only `dist/`, `package.json`, `README.md`
-(and `LICENSE` if present) — never `src/`, `examples/`, or `node_modules`
-(the `files` allowlist enforces this).
+Watch the **Release** workflow. It builds, refuses a version that is already on
+npm, refuses a tag that disagrees with `package.json`, checks the enclave is
+live, then publishes with `--provenance`.
 
-> Note: `prepare` and `prepublishOnly` already run the build for you on
-> `npm publish`, so the tarball can never contain a stale `dist/`. Running the
-> steps above by hand just lets you eyeball the output first.
+Provenance puts a verified badge on the npm page linking the tarball to the
+workflow run that built it. It needs the repository to be public and
+`id-token: write` in the workflow, both of which are in place.
 
-## 2. Log in and publish
+### One-time setup
+
+- Repository secret **`NPM_TOKEN`**: an npm automation token for an account with
+  publish rights on the `@proctorlink` scope. Granular tokens work; classic
+  tokens must be of type "Automation" so 2FA does not block CI.
+- Environment **`npm-publish`** in repository settings. Add required reviewers
+  there if you want a human approval before each publish.
+
+### Pre-releases
+
+A version with a hyphen publishes under the `next` dist-tag automatically, so
+`latest` stays stable:
 
 ```bash
-npm login                       # or: npm adduser
-npm whoami                      # confirm the right account
-npm publish                     # access:public is baked into publishConfig
+npm version 1.1.0-beta.1
+# installs with: npm install @proctorlink/sdk@next
 ```
 
-First publish of a brand-new name can also be forced explicit:
-`npm publish --access public`.
+### Publishing by hand
 
-## 3. Cutting later versions
+Only when Actions is unavailable. There is no provenance on a local publish.
 
 ```bash
-npm version patch               # 0.1.0 -> 0.1.1 (also creates a git tag)
-# npm version minor / major     # as appropriate (semver)
-npm publish
+npm ci
+npm run build && npm run types
+npm pack --dry-run          # expect dist/, package.json, README.md, LICENSE
+npm whoami                  # confirm the account
+npm publish --access public
 ```
 
-## 4. Verify it's live
+## Verify
 
 ```bash
 npm view @proctorlink/sdk version
-npm view @proctorlink/sdk dist.tarball
+npm view @proctorlink/sdk dist-tags
+npm view @proctorlink/sdk license      # should be: SEE LICENSE IN LICENSE
+curl -sI https://cdn.jsdelivr.net/npm/@proctorlink/sdk@latest/dist/proctorlink.js | head -1
 ```
+
+Then install it somewhere clean and start a session against the production
+enclave. The npm page is also worth a look: description, keywords, links and
+the provenance badge all come from this release.
+
+## Support window
+
+Published in the README so integrators can read it: the current minor version
+gets fixes, and the previous minor keeps security fixes for 6 months after its
+successor ships. Keep that promise in sync if it changes.
 
 ---
 
-## Using it before it's published (local testing)
+## Testing against a working copy
 
 The sample app at `../proctorlink-angular-sample` depends on
-`file:../proctorlink-sdk`, so it uses your working copy directly — the SDK's
-`prepare` script builds `dist/` automatically when the sample runs `npm install`.
+`file:../proctorlink-sdk`, so it uses your working tree directly. The SDK's
+`prepare` script builds `dist/` when the sample runs `npm install`.
 
-If you'd rather test the **exact tarball** that npm would publish:
+To test the exact tarball npm would publish:
 
 ```bash
-npm pack                                   # -> proctorlink-sdk-0.1.0.tgz
+npm pack                                   # -> proctorlink-sdk-1.0.1.tgz
 cd ../proctorlink-angular-sample
-npm install ../proctorlink-sdk/proctorlink-sdk-0.1.0.tgz
+npm install ../proctorlink-sdk/proctorlink-sdk-1.0.1.tgz
 ```
 
-After you publish for real, switch the sample's dependency from
-`file:../proctorlink-sdk` to the registry version:
+> esbuild installs a platform-specific binary. If `npm pack` fails complaining
+> about `@esbuild/darwin-arm64` versus `@esbuild/darwin-x64`, your `node_modules`
+> was installed with a Node of the other architecture. `rm -rf node_modules &&
+> npm ci` with the Node you intend to build with.
 
-```bash
-npm install @proctorlink/sdk@^0.1.0
-```
+## Pre-release checklist
 
----
-
-## Pre-publish checklist
-
-- [ ] `name` scope is one you own on npm.
-- [ ] `version` bumped (npm rejects re-publishing an existing version).
-- [ ] `npm pack --dry-run` shows `dist/` + types, nothing secret.
-- [ ] `README.md` renders acceptably (it's the npm landing page).
-- [ ] `license` field reflects your intent (currently `UNLICENSED` — change it
-      if you mean to open-source, since it publishes publicly).
-- [ ] Enclave is hosted somewhere real for production consumers — the published
-      package ships `dist/enclave/`, but customers still load it from **your**
-      HTTPS origin (`enclaveUrl`), not from npm.
+- [ ] `CHANGELOG.md` has an entry for this version, with a date.
+- [ ] Version bumped; `package.json` and `package-lock.json` agree.
+- [ ] Enclave deployed to `enclave.proctorlink.com/<version>/enclave.html`.
+- [ ] `npm pack --dry-run` shows `dist/` and types, and nothing from `src/`.
+- [ ] README renders acceptably — it is the npm landing page.
+- [ ] Breaking change? Then it is a major version, and the migration note
+      belongs in the changelog.

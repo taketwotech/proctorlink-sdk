@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main, production]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22']
+    name: build (node ${{ matrix.node }})
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      # `npm ci` runs `prepare`, which builds. Run the steps explicitly anyway
+      # so a failure points at the stage that broke.
+      - run: npm ci
+
+      - name: Bundle loader and enclave
+        run: npm run build
+
+      - name: Emit type declarations
+        run: npm run types
+
+      - name: Check what the tarball would contain
+        run: npm pack --dry-run
+
+      # The loader hard-codes the enclave version at build time, so a bundle
+      # that disagrees with package.json would load the wrong enclave.
+      - name: Enclave URL matches package version
+        run: |
+          version=$(node -p "require('./package.json').version")
+          expected="https://enclave.proctorlink.com/$version/enclave.html"
+          for bundle in dist/proctorlink.js dist/proctorlink.esm.js dist/proctorlink.cjs; do
+            if ! grep -qF "$expected" "$bundle"; then
+              echo "::error file=$bundle::does not point at $expected"
+              exit 1
+            fi
+          done
