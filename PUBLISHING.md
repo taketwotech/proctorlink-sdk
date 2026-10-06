@@ -107,6 +107,6 @@ npm install ../proctorlink-sdk/proctorlink-sdk-1.0.1.tgz
 - [ ] Version bumped; `package.json` and `package-lock.json` agree.
 - [ ] Enclave deployed to `enclave.proctorlink.com/<version>/enclave.html`.
 - [ ] `npm pack --dry-run` shows `dist/` and types, and nothing from `src/`.
-- [ ] README renders acceptably — it is the npm landing page.
+- [ ] README renders acceptably. It is the npm landing page.
 - [ ] Breaking change? Then it is a major version, and the migration note
       belongs in the changelog.

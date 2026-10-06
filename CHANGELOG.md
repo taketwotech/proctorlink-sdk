@@ -9,7 +9,7 @@ The enclave is version-matched to the loader, so every release pins its own
 `https://enclave.proctorlink.com/<version>/enclave.html`. Upgrading the package
 upgrades the enclave with it, and your `Content-Security-Policy` needs no change.
 
-## 1.0.1 — unreleased
+## 1.0.1 (unreleased)
 
 No change to the SDK's behaviour. Packaging and documentation only.
 
@@ -26,7 +26,7 @@ No change to the SDK's behaviour. Packaging and documentation only.
 - `SECURITY.md` with a private reporting channel and response targets.
 - `CONTRIBUTING.md`, and this changelog.
 
-## 1.0.0 — 2026-08-31
+## 1.0.0 (2026-08-31)
 
 First stable release. The API is now covered by semantic versioning.
 

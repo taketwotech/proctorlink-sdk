@@ -16,9 +16,9 @@ without TLS here; any other host needs HTTPS.
 
 What to read:
 
-- [`index.html`](./index.html) — the browser side. `createSession`, the
+- [`index.html`](./index.html): the browser side. `createSession`, the
   `permission` and `token-expired` handlers, and the event stream.
-- [`server.mjs`](./server.mjs) — the mint. Note that the API key lives here and
+- [`server.mjs`](./server.mjs): the mint. Note that the API key lives here and
   that `allowed_origins` has to name the origin serving the page.
 
 To pin a version instead of following the 1.x line, change the script tag to

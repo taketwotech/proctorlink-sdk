@@ -179,7 +179,7 @@ token for the **same** session and hand it over:
 
 ```ts
 session.on('token-expired', async () => {
-  // Same attempt_id as the original mint — the response has resumed: true
+  // Same attempt_id as the original mint, so the response has resumed: true
   // and the same session_id, with a fresh session_jwt.
   const { session_jwt } = await fetch('/api/proctoring/remint', { method: 'POST' })
     .then((r) => r.json());
