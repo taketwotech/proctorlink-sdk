@@ -1,65 +1,61 @@
 # Releasing `@proctorlink/sdk`
 
-Releases run from GitHub Actions on a version tag. Nothing publishes on a push
-to a branch.
+You run every command here. Nothing publishes automatically.
 
 ## The order that matters
 
 The loader asks for an enclave pinned to its own version
 (`https://enclave.proctorlink.com/<version>/enclave.html`). **Deploy the enclave
-before the package becomes installable.** Publish first and the next customer to
-upgrade loads a 404, and no session starts. `.github/workflows/release.yml`
-refuses to publish until that URL answers 200, but the deploy itself is still a
-manual step.
+before you publish to npm.** Publish first and the next customer to upgrade loads
+a 404, and no session starts.
+
+Check it before every publish:
+
+```bash
+version=$(node -p "require('./package.json').version")
+curl -sI "https://enclave.proctorlink.com/$version/enclave.html" | head -1
+# expect: HTTP/2 200
+```
 
 ## Cutting a release
 
 ```bash
-# 1. Update CHANGELOG.md: give the new version a date and list what changed.
-# 2. Bump the version. This commits and tags.
-npm version patch            # or minor / major
-# 3. Deploy dist/enclave to enclave.proctorlink.com/<new version>/
-# 4. Push the commit and the tag. The tag is what triggers the release.
-git push origin main --follow-tags
+# 1. CHANGELOG.md: give the new version a date and list what changed.
+
+# 2. Bump. This commits and tags.
+npm version patch                # or minor / major
+
+# 3. Build and look at what will ship.
+npm ci
+npm run build && npm run types
+npm pack --dry-run               # expect dist/, package.json, README.md, LICENSE
+
+# 4. Deploy dist/enclave to enclave.proctorlink.com/<new version>/ and confirm
+#    the URL above answers 200.
+
+# 5. Publish.
+npm whoami                       # confirm the account
+npm publish                      # access:public is baked into publishConfig
+
+# 6. Push the commit and the tag.
+git push --follow-tags
 ```
 
-Watch the **Release** workflow. It builds, refuses a version that is already on
-npm, refuses a tag that disagrees with `package.json`, checks the enclave is
-live, then publishes with `--provenance`.
-
-Provenance puts a verified badge on the npm page linking the tarball to the
-workflow run that built it. It needs the repository to be public and
-`id-token: write` in the workflow, both of which are in place.
-
-### One-time setup
-
-- Repository secret **`NPM_TOKEN`**: an npm automation token for an account with
-  publish rights on the `@proctorlink` scope. Granular tokens work; classic
-  tokens must be of type "Automation" so 2FA does not block CI.
-- Environment **`npm-publish`** in repository settings. Add required reviewers
-  there if you want a human approval before each publish.
+`prepare` and `prepublishOnly` rebuild on `npm publish`, so the tarball can never
+carry a stale `dist/`. Step 3 just lets you eyeball it first.
 
 ### Pre-releases
 
-A version with a hyphen publishes under the `next` dist-tag automatically, so
-`latest` stays stable:
+Keep `latest` stable by putting anything unfinished on the `next` dist-tag:
 
 ```bash
 npm version 1.1.0-beta.1
+npm publish --tag next
 # installs with: npm install @proctorlink/sdk@next
 ```
 
-### Publishing by hand
-
-Only when Actions is unavailable. There is no provenance on a local publish.
-
-```bash
-npm ci
-npm run build && npm run types
-npm pack --dry-run          # expect dist/, package.json, README.md, LICENSE
-npm whoami                  # confirm the account
-npm publish --access public
-```
+Without `--tag`, npm moves `latest` to whatever you just published, including a
+beta.
 
 ## Verify
 
@@ -71,8 +67,8 @@ curl -sI https://cdn.jsdelivr.net/npm/@proctorlink/sdk@latest/dist/proctorlink.j
 ```
 
 Then install it somewhere clean and start a session against the production
-enclave. The npm page is also worth a look: description, keywords, links and
-the provenance badge all come from this release.
+enclave. The npm page is worth a look too: description, keywords and links all
+come from this release.
 
 ## Support window
 
@@ -105,7 +101,8 @@ npm install ../proctorlink-sdk/proctorlink-sdk-1.0.1.tgz
 
 - [ ] `CHANGELOG.md` has an entry for this version, with a date.
 - [ ] Version bumped; `package.json` and `package-lock.json` agree.
-- [ ] Enclave deployed to `enclave.proctorlink.com/<version>/enclave.html`.
+- [ ] Enclave deployed to `enclave.proctorlink.com/<version>/enclave.html`, and
+      the URL answers 200.
 - [ ] `npm pack --dry-run` shows `dist/` and types, and nothing from `src/`.
 - [ ] README renders acceptably. It is the npm landing page.
 - [ ] Breaking change? Then it is a major version, and the migration note

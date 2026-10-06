@@ -58,5 +58,5 @@ version bump explained in [PUBLISHING.md](./PUBLISHING.md).
 
 ## Releases
 
-Maintainers publish from `production` following [PUBLISHING.md](./PUBLISHING.md).
-Nothing publishes automatically.
+Maintainers publish by hand, following [PUBLISHING.md](./PUBLISHING.md). Nothing
+publishes automatically.
