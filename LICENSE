@@ -1,0 +1,33 @@
+ProctorLink SDK License
+
+Copyright (c) 2026 Take2 Technologies. All rights reserved.
+
+This software is proprietary and is licensed, not sold.
+
+Permission is granted to install this package and to integrate it into your own
+applications for the purpose of using the ProctorLink service, subject to the
+ProctorLink End User License Agreement at https://proctorlink.com/eula and to
+any separate written agreement between you and Take2 Technologies. Where the two
+differ, the separate written agreement prevails.
+
+Use of this package requires a valid ProctorLink account. Proctoring data is
+processed by the ProctorLink service under the terms and the privacy policy
+published at https://proctorlink.com/privacy-policy.
+
+You may not:
+
+  - redistribute, sublicense, sell or publish this package or any part of it,
+    whether modified or unmodified, other than as a dependency bundled into your
+    own application;
+  - reverse engineer, decompile or disassemble the enclave, except where that
+    restriction is prohibited by applicable law;
+  - remove or alter any copyright, trademark or licence notice.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Questions about licensing: support@proctorlink.com

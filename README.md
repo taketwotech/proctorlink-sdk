@@ -8,6 +8,12 @@ The SDK captures identity keyframes and integrity signals during an assessment
 and streams them to ProctorLink, which produces the proctoring report. Your app
 also receives the live event stream, so you can react or keep your own copy.
 
+**Links:** [Integration guide](https://proctorlink.com/knowledge/proctoring-for-custom-assessment-platforms?utm_source=npmjs_portal&utm_medium=web&utm_campaign=npmjs_traffic) ·
+[React](https://proctorlink.com/knowledge/react-proctoring-integration?utm_source=npmjs_portal&utm_medium=web&utm_campaign=npmjs_traffic) ·
+[Angular](https://proctorlink.com/knowledge/angular-proctoring-integration?utm_source=npmjs_portal&utm_medium=web&utm_campaign=npmjs_traffic) ·
+[LTI 1.3](https://proctorlink.com/knowledge/lti-1-3-proctoring-integration?utm_source=npmjs_portal&utm_medium=web&utm_campaign=npmjs_traffic) ·
+[Support](https://proctorlink.com/contact?utm_source=npmjs_portal&utm_medium=web&utm_campaign=npmjs_traffic)
+
 ## Installation
 
 ```bash
@@ -90,7 +96,7 @@ handled by ProctorLink.
 | `sessionId`   | decoded from `jwt` | The `session_id` from the same response. Optional — read from the JWT if omitted. |
 | `draggable`   | `true`             | Allows candidates to drag and reposition the camera preview anywhere on screen. |
 | `showPreview` | `true`             | Show the camera preview pip. Set `false` to hide it completely. |
-| `heartbeatIntervalMs` | `15000`    | Liveness cadence. Lowering it does not improve detection (gap size is decided server-side) and multiplies uploaded telemetry. Changed from `5000` in 0.5.0. |
+| `heartbeatIntervalMs` | `15000`    | Liveness cadence. Lowering it does not improve detection (gap size is decided server-side) and multiplies uploaded telemetry. |
 | `ingestBaseUrl` | `https://api.proctorlink.com` | Where proctoring data is sent. Defaults to production — see below. |
 | `mount`       | floating pip       | Custom container element for the camera preview. |
 
@@ -179,8 +185,7 @@ interfered with the enclave. Neither event counts against the integrity score.
 Two behaviours worth knowing:
 
 - **The camera is released while paused** and the preview is hidden, so the
-  browser's capture indicator goes out. `resume()` re-opens it. (Before 0.4.0 the
-  stream was left open; it is not any more.)
+  browser's capture indicator goes out. `resume()` re-opens it.
 - **Pausing before capture started keeps it stopped.** If the session was created
   with `autoStartCapture: false` and you pause during the identity step,
   `resume()` restores camera-on-but-not-recording rather than starting the
@@ -278,4 +283,6 @@ page's JavaScript, and SDK improvements ship without you redeploying.
 
 ## License
 
-Proprietary. © ProctorLink. All rights reserved.
+Proprietary. © 2026 Take2 Technologies. All rights reserved. See [LICENSE](./LICENSE)
+and the [End User License Agreement](https://proctorlink.com/eula?utm_source=npmjs_portal&utm_medium=web&utm_campaign=npmjs_traffic).
+Use requires a ProctorLink account.
